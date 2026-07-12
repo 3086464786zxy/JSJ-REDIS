@@ -7,6 +7,7 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
+import org.springframework.security.jackson2.SecurityJackson2Modules;
 
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -84,6 +85,16 @@ public class RedisConfig {
                 new JavaTimeModule()
         );
 
+        /*
+         * 注册 Spring Security 提供的 Jackson MixIn。
+         * SimpleGrantedAuthority 没有无参构造方法，必须通过该模块才能正确反序列化。
+         */
+        mapper.registerModules(
+                SecurityJackson2Modules.getModules(
+                        RedisConfig.class.getClassLoader()
+                )
+        );
+
 
 
         /*
@@ -127,8 +138,14 @@ public class RedisConfig {
         PolymorphicTypeValidator validator =
                 BasicPolymorphicTypeValidator.builder()
 
-                        // 允许com.itmk包下的对象反序列化
-                        .allowIfSubType("com.itmk")
+                        // 允许项目自身的对象反序列化
+                        .allowIfSubType("com.itmk.")
+
+                        // SysUser.authorities 的集合实现类型（如 ArrayList）
+                        .allowIfSubType("java.util.")
+
+                        // Spring Security 的权限实现类型（如 SimpleGrantedAuthority）
+                        .allowIfSubType("org.springframework.security.core.authority.")
 
                         .build();
 
