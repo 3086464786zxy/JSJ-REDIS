@@ -32,7 +32,7 @@ class Http{
         //在请求头部携带token
         let token = userStore.getToken;
         if (token) {
-          config.headers!['token'] = token
+          config.headers!['Authorization'] = `Bearer ${token}`
         }
         return config;
       },
@@ -50,7 +50,7 @@ class Http{
           //跳转到登录
           userStore.setToken('')
           userStore.setUserId('')
-          localStorage.clear()
+          sessionStorage.clear()
           window.location.href = '/login'
         } else if (res.data.code == 200) {
           return res.data

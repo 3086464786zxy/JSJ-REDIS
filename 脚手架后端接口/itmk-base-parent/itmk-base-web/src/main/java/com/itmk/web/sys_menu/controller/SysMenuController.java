@@ -1,6 +1,7 @@
 package com.itmk.web.sys_menu.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.itmk.config.security.service.PermissionCacheService;
 import com.itmk.utils.ResultUtils;
 import com.itmk.utils.ResultVo;
 import com.itmk.web.sys_menu.entity.MakeMenuTree;
@@ -27,6 +28,8 @@ public class SysMenuController {
     private SysMenuService sysMenuService;
     @Autowired
     private SysUserService sysUserService;
+    @Autowired
+    private PermissionCacheService permissionCacheService;
 
     //新增
     @PreAuthorize("hasAuthority('sys:menu:add')")
@@ -34,6 +37,7 @@ public class SysMenuController {
     public ResultVo add(@RequestBody SysMenu sysMenu) {
         sysMenu.setCreateTime(LocalDateTime.now());
         if (sysMenuService.save(sysMenu)) {
+            permissionCacheService.invalidateAll();
             return ResultUtils.success("新增成功!");
         }
         return ResultUtils.error("新增失败!");
@@ -45,6 +49,7 @@ public class SysMenuController {
     public ResultVo edit(@RequestBody SysMenu sysMenu) {
         sysMenu.setUpdateTime(LocalDateTime.now());
         if (sysMenuService.updateById(sysMenu)) {
+            permissionCacheService.invalidateAll();
             return ResultUtils.success("编辑成功!");
         }
         return ResultUtils.error("编辑失败!");
@@ -63,6 +68,7 @@ public class SysMenuController {
         }
 
         if (sysMenuService.removeById(menuId)) {
+            permissionCacheService.invalidateAll();
             return ResultUtils.success("删除成功!");
         }
         return ResultUtils.error("删除失败!");

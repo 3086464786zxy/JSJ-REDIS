@@ -22,6 +22,7 @@ export type SysUserListParm = {
 export type Login = {
   username:string;
   password:string;
+  captchaId:string;
   code:string;
 }
 //菜单树参数

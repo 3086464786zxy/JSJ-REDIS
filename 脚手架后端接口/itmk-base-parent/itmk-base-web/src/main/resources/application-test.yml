@@ -17,10 +17,23 @@ spring:
 jwt:
   #颁发者
   issuer: itmk
-  #秘钥
-  secret: com.itmk
+  #接收该 Token 的 API
+  audience: itmk-api
+  #生产环境必须通过 JWT_SECRET 环境变量提供至少 32 字节的随机密钥
+  secret: ${JWT_SECRET:change-this-development-secret-at-least-32-bytes}
   #30分钟过期
   expiration: 30
+
+#认证缓存和限流参数，可按压测结果通过环境配置覆盖
+app:
+  security:
+    captcha-ttl-seconds: 120
+    permission-ttl-seconds: 900
+    permission-ttl-jitter-seconds: 180
+    rate-limit:
+      captcha-per-minute: 20
+      login-ip-per-minute: 20
+      login-user-per-minute: 10
 
 #不需要token验证的请求，逗号分隔配置
 ignore:
@@ -47,6 +60,7 @@ spring.data.redis:
   timeout: 5000ms
   lettuce:
     pool:
-      max-active: 8
-      max-idle: 8
-      min-idle: 0
+      max-active: 32
+      max-idle: 16
+      min-idle: 4
+      max-wait: 1000ms

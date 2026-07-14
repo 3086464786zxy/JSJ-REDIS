@@ -5,6 +5,12 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.google.code.kaptcha.impl.DefaultKaptcha;
+import com.auth0.jwt.interfaces.DecodedJWT;
+import com.itmk.config.security.dto.AuthSessionDto;
+import com.itmk.config.security.filter.CheckTokenFilter;
+import com.itmk.config.security.service.AuthRedisService;
+import com.itmk.config.security.service.PermissionCacheService;
+import com.itmk.config.security.service.RateLimitService;
 import com.itmk.jwt.JwtUtils;
 import com.itmk.utils.ResultUtils;
 import com.itmk.utils.ResultVo;
@@ -22,16 +28,15 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.authentication.logout.SecurityContextLogoutHandler;
 import org.springframework.web.bind.annotation.*;
 
 import javax.imageio.ImageIO;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import jakarta.servlet.http.HttpSession;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -55,6 +60,12 @@ public class SysUserController {
     private AuthenticationManager authenticationManager;
     @Autowired
     private PasswordEncoder passwordEncoder;
+    @Autowired
+    private AuthRedisService authRedisService;
+    @Autowired
+    private PermissionCacheService permissionCacheService;
+    @Autowired
+    private RateLimitService rateLimitService;
 
     //新增
     @PreAuthorize("hasAuthority('sys:user:add')")
@@ -80,6 +91,7 @@ public class SysUserController {
     public ResultVo edit(@RequestBody SysUser sysUser) {
         sysUser.setUpdateTime(LocalDateTime.now());
         sysUserService.editUser(sysUser);
+        permissionCacheService.invalidateUser(sysUser.getUserId());
         return ResultUtils.success("编辑成功!");
     }
 
@@ -88,6 +100,8 @@ public class SysUserController {
     @DeleteMapping("/{userId}")
     public ResultVo delete(@PathVariable("userId") Long userId) {
         sysUserService.deleteUser(userId);
+        permissionCacheService.invalidateUser(userId);
+        authRedisService.deleteAllSessions(userId);
         return ResultUtils.success("删除成功");
     }
 
@@ -132,6 +146,7 @@ public class SysUserController {
         updateWrapper.lambda().eq(SysUser::getUserId, sysUser.getUserId())
                 .set(SysUser::getPassword, passwordEncoder.encode("666666"));
         if(sysUserService.update(updateWrapper)) {
+            authRedisService.deleteAllSessions(sysUser.getUserId());
             return ResultUtils.success("密码重置成功!");
         }
         return ResultUtils.error("密码重置失败!");
@@ -140,71 +155,68 @@ public class SysUserController {
     //图片验证码
     @PostMapping("/getImage")
     public ResultVo imageCode(HttpServletRequest request) {
-        HttpSession session = request.getSession();
-        // 生成验证码文本
+        if (!rateLimitService.allowCaptcha(request)) {
+            return ResultUtils.error("验证码获取过于频繁，请稍后再试", 429);
+        }
+
         String text = defaultKaptcha.createText();
-        // 存入 Session
-        session.setAttribute("code", text);
-        // 生成验证码图片
+        String captchaId = UUID.randomUUID().toString().replace("-", "");
+        // Redis 自动过期，登录校验时会原子读取并删除。
+        authRedisService.saveCaptcha(captchaId, text);
         BufferedImage bufferedImage = defaultKaptcha.createImage(text);
 
         try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
             ImageIO.write(bufferedImage, "jpg", outputStream);
             byte[] bytes = outputStream.toByteArray();
-            // ✅ 使用 Java 官方 Base64 编码
             String base64 = Base64.getEncoder().encodeToString(bytes);
             String captchaBase64 = "data:image/jpeg;base64," + base64;
-            return new ResultVo("生成成功", 200, captchaBase64);
+            return ResultUtils.success("生成成功", new CaptchaVo(captchaId, captchaBase64));
         } catch (IOException e) {
-            e.printStackTrace();
-            return new ResultVo("生成失败", 500, null);
+            return ResultUtils.error("验证码生成失败");
         }
     }
 
     //登录
     @PostMapping("/login")
     public ResultVo login(HttpServletRequest request,@RequestBody LoginParm parm) {
-        //获取前端传递过来的code(验证码)
-        String code = parm.getCode();
-        //获取sesson
-        HttpSession session = request.getSession();
-        //获取session里面的code(验证码)
-        String code1 = (String) session.getAttribute("code");
-        if (StringUtils.isEmpty(code1)) {
+        if (!rateLimitService.allowLogin(request, parm.getUsername())) {
+            return ResultUtils.error("登录尝试过于频繁，请稍后再试", 429);
+        }
+
+        if (StringUtils.isEmpty(parm.getCaptchaId())) {
             return ResultUtils.error("验证码过期!");
         }
-        //判断前端传递进来的code和session里面的code是否相等
-        if (!code1.equals(code)) {
-            System.out.println("------------------------------------------");
+        String expectedCode = authRedisService.consumeCaptcha(parm.getCaptchaId());
+        if (StringUtils.isEmpty(expectedCode)) {
+            return ResultUtils.error("验证码过期!");
+        }
+        if (!expectedCode.equalsIgnoreCase(parm.getCode())) {
             return ResultUtils.error("验证码不正确!");
         }
 
-        //
-        String password = passwordEncoder.encode(parm.getPassword());
-        //查询用户信息, 交给springsecurity查询
+        // 用户名、密码由 Spring Security 和 BCrypt 完成认证。
         UsernamePasswordAuthenticationToken authenticationToken =
                 new UsernamePasswordAuthenticationToken(parm.getUsername(), parm.getPassword());
         Authentication authentication = authenticationManager.authenticate(authenticationToken);
-        //交给springsecurity
         SecurityContextHolder.getContext().setAuthentication(authentication);
-        //获取用户信息
         SysUser user = (SysUser)authentication.getPrincipal();
-        //QueryWrapper<SysUser> queryWrapper = new QueryWrapper<>();
-        //queryWrapper.lambda().eq(SysUser::getUsername,parm.getUsername())
-        //        .eq(SysUser::getPassword,parm.getPassword());
-        //SysUser one = sysUserService.getOne(queryWrapper);
-        //if (one == null) {
-        //    return ResultUtils.error("用户名或密码不正确");
-        //}
 
-        //返回用户信息和token
+        String sessionId = UUID.randomUUID().toString();
+        Duration sessionTtl = Duration.ofMinutes(jwtUtils.getExpiration());
+        authRedisService.createSession(
+                sessionId,
+                new AuthSessionDto(user.getUserId(), user.getUsername(), System.currentTimeMillis()),
+                sessionTtl
+        );
+        permissionCacheService.cacheLoginUser(user);
+
         LoginVo vo = new LoginVo();
         vo.setUserId(user.getUserId());
         vo.setNickName(user.getNickName());
-        //生成token
         Map<String,String> mp = new HashMap<>();
         mp.put("userId",Long.toString(user.getUserId()));
         mp.put("username",user.getUsername());
+        mp.put("sid", sessionId);
         String token = jwtUtils.generateToken(mp);
         vo.setToken(token);
         return ResultUtils.success("登录成功",vo);
@@ -233,6 +245,7 @@ public class SysUserController {
         updateWrapper.lambda().set(SysUser::getPassword,passwordEncoder.encode(parm.getPassword()))
                 .eq(SysUser::getUserId, parm.getUserId());
         if (sysUserService.update(updateWrapper)) {
+            authRedisService.deleteAllSessions(parm.getUserId());
             return ResultUtils.success("密码修改成功!");
         }
         return ResultUtils.error("密码修改失败!");
@@ -270,6 +283,17 @@ public class SysUserController {
     //退出登录
     @PostMapping("/loginOut")
     public ResultVo loginOut(HttpServletRequest request, HttpServletResponse response) {
+        String token = CheckTokenFilter.resolveToken(request);
+        if (token != null) {
+            try {
+                DecodedJWT jwt = jwtUtils.jwtDecode(token);
+                Long userId = Long.valueOf(jwt.getClaim("userId").asString());
+                String sessionId = jwt.getClaim("sid").asString();
+                authRedisService.deleteSession(userId, sessionId);
+            } catch (RuntimeException ignored) {
+                // Token 已无效时也允许客户端完成本地退出。
+            }
+        }
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null) {
             new SecurityContextLogoutHandler().logout(request, response, authentication);

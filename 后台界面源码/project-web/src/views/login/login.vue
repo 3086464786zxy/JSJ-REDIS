@@ -45,6 +45,7 @@ const userStore = useUserStore()
 const loginModel = reactive({
   username:'',
   password:'',
+  captchaId:'',
   code:''
 })
 //表单ref属性
@@ -72,21 +73,31 @@ const imgsrc = ref('')
 const getImg = async ()=>{
   let res = await getImgApi()
   if (res && res.code == 200) {
-    imgsrc.value = res.data;
+    loginModel.captchaId = res.data.captchaId;
+    imgsrc.value = res.data.image;
   }
 }
 const commit = ()=>{
   form.value?.validate( async (valid)=>{
     if (valid) {
-      let res = await loginApi(loginModel);
-      if (res && res.code == 200) {
-        //存储用户信息
-        console.log(res);
-        userStore.setUserId(res.data.userId);
-        userStore.setNickName(res.data.nickName);
-        userStore.setToken(res.data.token);
-        //跳转路由
-        router.push({path:'/'});
+      let loginSuccess = false
+      try {
+        let res = await loginApi(loginModel);
+        if (res && res.code == 200) {
+          loginSuccess = true
+          userStore.setUserId(res.data.userId);
+          userStore.setNickName(res.data.nickName);
+          userStore.setToken(res.data.token);
+          router.push({path:'/'});
+        }
+      } catch {
+        // 错误提示由 Axios 响应拦截器统一处理。
+      } finally {
+        if (!loginSuccess) {
+          // 验证码在后端只允许使用一次，登录失败后必须重新获取。
+          loginModel.code = ''
+          await getImg()
+        }
       }
     }
   })
