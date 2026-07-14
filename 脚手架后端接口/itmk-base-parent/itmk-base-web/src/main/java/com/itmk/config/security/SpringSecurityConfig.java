@@ -4,11 +4,12 @@ import com.itmk.config.security.filter.CheckTokenFilter;
 import com.itmk.config.security.handler.CustomAccessDeineHandler;
 import com.itmk.config.security.handler.LoginFailureHandler;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
-import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -22,11 +23,11 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 /**
  * @Configuration: 表明SpringSecurityConfig类是一个配置类
  * @EnableWebSecurity：启动springsecurity
- * @EnableGlobalMethodSecurity(prePostEnabled = true) : 启用springsecurity的注解
+ * @EnableMethodSecurity : 启用方法级权限注解
  */
 @Configuration
 @EnableWebSecurity
-@EnableGlobalMethodSecurity(prePostEnabled = true)
+@EnableMethodSecurity
 public class SpringSecurityConfig {
     @Autowired
     private CustomerUserDetailService customerUserDetailService;
@@ -40,6 +41,16 @@ public class SpringSecurityConfig {
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
+
+    /** 该过滤器只加入 SecurityFilterChain，禁止容器再次自动注册。 */
+    @Bean
+    public FilterRegistrationBean<CheckTokenFilter> disableTokenFilterAutoRegistration() {
+        FilterRegistrationBean<CheckTokenFilter> registration =
+                new FilterRegistrationBean<>(checkTokenFilter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws
             Exception {

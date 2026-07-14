@@ -3,6 +3,7 @@ package com.itmk.web.sys_role.controller;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.itmk.config.security.service.PermissionCacheService;
 import com.itmk.utils.ResultUtils;
 import com.itmk.utils.ResultVo;
 import com.itmk.web.sys_role.entity.RoleParm;
@@ -28,6 +29,8 @@ public class SysRoleController {
     private SysRoleService sysRoleService;
     @Autowired
     private RoleMenuService roleMenuService;
+    @Autowired
+    private PermissionCacheService permissionCacheService;
 
     //新增
     @PreAuthorize("hasAuthority('sys:role:add')")
@@ -56,6 +59,7 @@ public class SysRoleController {
     @DeleteMapping("/{roleId}")
     public ResultVo delete(@PathVariable("roleId") Long roleId) {
         if (sysRoleService.removeById(roleId)) {
+            permissionCacheService.invalidateAll();
             return ResultUtils.success("删除成功!");
         }
         return ResultUtils.error("删除失败!");
@@ -97,6 +101,7 @@ public class SysRoleController {
     @PostMapping("/saveRoleMenu")
     public ResultVo saveRoleMenu(@RequestBody SaveMenuParm parm) {
         roleMenuService.saveRoleMenu(parm);
+        permissionCacheService.invalidateAll();
         return ResultUtils.success("分配成功");
     }
 }
