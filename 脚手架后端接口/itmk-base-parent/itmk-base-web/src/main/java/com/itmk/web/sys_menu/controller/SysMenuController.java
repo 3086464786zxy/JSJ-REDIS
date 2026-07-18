@@ -1,7 +1,10 @@
 package com.itmk.web.sys_menu.controller;
 
+import com.auth0.jwt.interfaces.DecodedJWT;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.itmk.config.security.filter.CheckTokenFilter;
 import com.itmk.config.security.service.PermissionCacheService;
+import com.itmk.jwt.JwtUtils;
 import com.itmk.utils.ResultUtils;
 import com.itmk.utils.ResultVo;
 import com.itmk.web.sys_menu.entity.MakeMenuTree;
@@ -10,6 +13,7 @@ import com.itmk.web.sys_menu.entity.SysMenu;
 import com.itmk.web.sys_menu.service.SysMenuService;
 import com.itmk.web.sys_user.entity.SysUser;
 import com.itmk.web.sys_user.service.SysUserService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.apache.commons.lang.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -30,6 +34,8 @@ public class SysMenuController {
     private SysUserService sysUserService;
     @Autowired
     private PermissionCacheService permissionCacheService;
+    @Autowired
+    private JwtUtils jwtUtils;
 
     //新增
     @PreAuthorize("hasAuthority('sys:menu:add')")
@@ -95,11 +101,12 @@ public class SysMenuController {
         return ResultUtils.success("查询成功!",list);
     }
 
-    //获取菜单
+    //获取当前用户的菜单
     @GetMapping("/getMenuList")
-    public ResultVo getMenuList(Long userId) {
+    public ResultVo getMenuList(HttpServletRequest request) {
+        Long currentUserId = extractUserId(request);
         //获取用户的信息
-        SysUser user = sysUserService.getById(userId);
+        SysUser user = sysUserService.getById(currentUserId);
         //菜单数据
         List<SysMenu> menuList = null;
         //判断是否是超级管理员
@@ -108,7 +115,7 @@ public class SysMenuController {
             query.lambda().orderByAsc(SysMenu::getOrderNum);
             menuList = sysMenuService.list(query);
         } else {
-           menuList = sysMenuService.getMenuByUserId(userId);
+           menuList = sysMenuService.getMenuByUserId(currentUserId);
         }
         //过滤菜单数据, 去掉按钮数据
         List<SysMenu> collect = Optional.ofNullable(menuList).orElse(new ArrayList<>())
@@ -117,7 +124,13 @@ public class SysMenuController {
                 .collect(Collectors.toList());
         //组装路由数据
         List<RouterVO> router = MakeMenuTree.makeRouter(collect,0L);
-        System.out.println(router);
         return ResultUtils.success("查询成功!",router);
+    }
+
+    /** 从请求的 JWT Token 中提取当前用户 ID */
+    private Long extractUserId(HttpServletRequest request) {
+        String token = CheckTokenFilter.resolveToken(request);
+        DecodedJWT jwt = jwtUtils.jwtDecode(token);
+        return Long.valueOf(jwt.getClaim("userId").asString());
     }
 }

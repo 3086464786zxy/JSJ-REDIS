@@ -26,6 +26,8 @@ public class JwtUtils {
     private String secret;
     /** Access Token 有效期，单位：分钟。 */
     private int expiration;
+    /** Refresh Token 有效期，单位：分钟。 */
+    private int refreshExpiration;
 
     private Algorithm algorithm;
     private JWTVerifier verifier;

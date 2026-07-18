@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.google.code.kaptcha.impl.DefaultKaptcha;
 import com.auth0.jwt.interfaces.DecodedJWT;
 import com.itmk.config.security.dto.AuthSessionDto;
+import com.itmk.config.security.dto.RefreshTokenDto;
 import com.itmk.config.security.filter.CheckTokenFilter;
 import com.itmk.config.security.service.AuthRedisService;
 import com.itmk.config.security.service.PermissionCacheService;
@@ -31,6 +32,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.authentication.logout.SecurityContextLogoutHandler;
 import org.springframework.web.bind.annotation.*;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
 import javax.imageio.ImageIO;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -67,6 +71,13 @@ public class SysUserController {
     @Autowired
     private RateLimitService rateLimitService;
 
+    @Value("${app.security.refresh-token.cookie-name:refresh_token}")
+    private String cookieName;
+    @Value("${app.security.refresh-token.cookie-secure:false}")
+    private boolean cookieSecure;
+    @Value("${app.security.refresh-token.cookie-same-site:Lax}")
+    private String cookieSameSite;
+
     //新增
     @PreAuthorize("hasAuthority('sys:user:add')")
     @PostMapping
@@ -102,6 +113,7 @@ public class SysUserController {
         sysUserService.deleteUser(userId);
         permissionCacheService.invalidateUser(userId);
         authRedisService.deleteAllSessions(userId);
+        authRedisService.deleteAllRefreshTokens(userId);
         return ResultUtils.success("删除成功");
     }
 
@@ -147,6 +159,7 @@ public class SysUserController {
                 .set(SysUser::getPassword, passwordEncoder.encode("666666"));
         if(sysUserService.update(updateWrapper)) {
             authRedisService.deleteAllSessions(sysUser.getUserId());
+            authRedisService.deleteAllRefreshTokens(sysUser.getUserId());
             return ResultUtils.success("密码重置成功!");
         }
         return ResultUtils.error("密码重置失败!");
@@ -178,7 +191,7 @@ public class SysUserController {
 
     //登录
     @PostMapping("/login")
-    public ResultVo login(HttpServletRequest request,@RequestBody LoginParm parm) {
+    public ResultVo login(HttpServletRequest request, HttpServletResponse response, @RequestBody LoginParm parm) {
         if (!rateLimitService.allowLogin(request, parm.getUsername())) {
             return ResultUtils.error("登录尝试过于频繁，请稍后再试", 429);
         }
@@ -219,6 +232,14 @@ public class SysUserController {
         mp.put("sid", sessionId);
         String token = jwtUtils.generateToken(mp);
         vo.setToken(token);
+
+        // 签发 RefreshToken 并写入 httpOnly Cookie
+        String refreshToken = UUID.randomUUID().toString();
+        Duration refreshTtl = Duration.ofMinutes(jwtUtils.getRefreshExpiration());
+        RefreshTokenDto refreshDto = new RefreshTokenDto(user.getUserId(), user.getUsername(), sessionId);
+        authRedisService.saveRefreshToken(refreshToken, refreshDto, refreshTtl);
+        setRefreshCookie(response, refreshToken, refreshTtl);
+
         return ResultUtils.success("登录成功",vo);
     }
 
@@ -232,8 +253,9 @@ public class SysUserController {
     }
 
     @PostMapping("/updatePassword")
-    public ResultVo updatePassword(@RequestBody UpdatePasswordParm parm) {
-        SysUser sysUser = sysUserService.getById(parm.getUserId());
+    public ResultVo updatePassword(HttpServletRequest request, @RequestBody UpdatePasswordParm parm) {
+        Long currentUserId = extractUserId(request);
+        SysUser sysUser = sysUserService.getById(currentUserId);
         //if (!sysUser.getPassword().equals(parm.getOldPassword())) {
         //    return ResultUtils.error("原密码不正确");
         //}
@@ -243,27 +265,28 @@ public class SysUserController {
         //更新条件
         UpdateWrapper<SysUser> updateWrapper = new UpdateWrapper<>();
         updateWrapper.lambda().set(SysUser::getPassword,passwordEncoder.encode(parm.getPassword()))
-                .eq(SysUser::getUserId, parm.getUserId());
+                .eq(SysUser::getUserId, currentUserId);
         if (sysUserService.update(updateWrapper)) {
-            authRedisService.deleteAllSessions(parm.getUserId());
+            authRedisService.deleteAllSessions(currentUserId);
+            authRedisService.deleteAllRefreshTokens(currentUserId);
             return ResultUtils.success("密码修改成功!");
         }
         return ResultUtils.error("密码修改失败!");
     }
 
-    //获取用户的信息
+    //获取当前用户的信息
     @GetMapping("/getUserInfo")
-    public ResultVo getUserInfo(Long userId) {
-        System.out.println("getUserInfo");
+    public ResultVo getUserInfo(HttpServletRequest request) {
+        Long currentUserId = extractUserId(request);
         //根据id查询用户信息
-        SysUser user = sysUserService.getById(userId);
+        SysUser user = sysUserService.getById(currentUserId);
         List<SysMenu> menuList = null;
         //判断是否是超级管理员
         if (StringUtils.isNotEmpty(user.getIsAdmin()) && "1".equals(user.getIsAdmin())) {
             //超级管理员,直接查询得到所有菜单
             menuList = sysMenuService.list();
         } else {
-            menuList = sysMenuService.getMenuByUserId(userId);
+            menuList = sysMenuService.getMenuByUserId(currentUserId);
         }
         //获取菜单表的code字段
         List<String> collect = Optional.ofNullable(menuList).orElse(new ArrayList<>())
@@ -283,6 +306,7 @@ public class SysUserController {
     //退出登录
     @PostMapping("/loginOut")
     public ResultVo loginOut(HttpServletRequest request, HttpServletResponse response) {
+        // 1. 尝试从 JWT 中解析并删除 Redis 会话
         String token = CheckTokenFilter.resolveToken(request);
         if (token != null) {
             try {
@@ -294,10 +318,70 @@ public class SysUserController {
                 // Token 已无效时也允许客户端完成本地退出。
             }
         }
+
+        // 2. 删除 RefreshToken 并清除 Cookie
+        String refreshToken = extractCookie(request);
+        if (refreshToken != null) {
+            try {
+                RefreshTokenDto stored = authRedisService.getRefreshToken(refreshToken);
+                if (stored != null) {
+                    authRedisService.deleteRefreshToken(refreshToken, stored.getUserId());
+                }
+            } catch (RuntimeException ignored) {
+                // RefreshToken 查询失败时忽略
+            }
+        }
+        clearRefreshCookie(response);
+
+        // 3. 清除 SecurityContext
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null) {
             new SecurityContextLogoutHandler().logout(request, response, authentication);
         }
         return ResultUtils.success("退出成功!");
+    }
+
+    /** 从请求的 JWT Token 中提取当前用户 ID */
+    private Long extractUserId(HttpServletRequest request) {
+        String token = CheckTokenFilter.resolveToken(request);
+        DecodedJWT jwt = jwtUtils.jwtDecode(token);
+        return Long.valueOf(jwt.getClaim("userId").asString());
+    }
+
+    // ────────── Cookie 工具方法 ──────────
+
+    private void setRefreshCookie(HttpServletResponse response, String value, Duration maxAge) {
+        ResponseCookie cookie = ResponseCookie.from(cookieName, value)
+                .httpOnly(true)
+                .secure(cookieSecure)
+                .sameSite(cookieSameSite)
+                .path("/api/")
+                .maxAge(maxAge)
+                .build();
+        response.setHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+    }
+
+    private void clearRefreshCookie(HttpServletResponse response) {
+        ResponseCookie cookie = ResponseCookie.from(cookieName, "")
+                .httpOnly(true)
+                .secure(cookieSecure)
+                .sameSite(cookieSameSite)
+                .path("/api/")
+                .maxAge(0)
+                .build();
+        response.setHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+    }
+
+    private String extractCookie(HttpServletRequest request) {
+        jakarta.servlet.http.Cookie[] cookies = request.getCookies();
+        if (cookies == null) {
+            return null;
+        }
+        for (jakarta.servlet.http.Cookie cookie : cookies) {
+            if (cookieName.equals(cookie.getName())) {
+                return cookie.getValue();
+            }
+        }
+        return null;
     }
 }
