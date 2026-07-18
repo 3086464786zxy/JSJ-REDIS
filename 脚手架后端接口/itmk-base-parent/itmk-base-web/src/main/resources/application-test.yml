@@ -11,7 +11,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/itmk_base?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&serverTimezone=GMT%2B8
     username: root
-    password: 123
+    password: 123456
 
 #jwt配置
 jwt:
@@ -21,8 +21,10 @@ jwt:
   audience: itmk-api
   #生产环境必须通过 JWT_SECRET 环境变量提供至少 32 字节的随机密钥
   secret: ${JWT_SECRET:change-this-development-secret-at-least-32-bytes}
-  #30分钟过期
+  #Access Token 30分钟过期
   expiration: 30
+  #Refresh Token 7天过期（分钟）
+  refresh-expiration: 10080
 
 #认证缓存和限流参数，可按压测结果通过环境配置覆盖
 app:
@@ -30,6 +32,10 @@ app:
     captcha-ttl-seconds: 120
     permission-ttl-seconds: 900
     permission-ttl-jitter-seconds: 180
+    refresh-token:
+      cookie-name: refresh_token
+      cookie-secure: false   # 生产环境设置为 true（仅 HTTPS）
+      cookie-same-site: Lax
     rate-limit:
       captcha-per-minute: 20
       login-ip-per-minute: 20
@@ -37,7 +43,7 @@ app:
 
 #不需要token验证的请求，逗号分隔配置
 ignore:
-  url: /api/sysUser/login,/api/sysUser/getImage
+  url: /api/sysUser/login,/api/sysUser/getImage,/api/refresh
 
 #mybatis plus配置
 mybatis-plus:

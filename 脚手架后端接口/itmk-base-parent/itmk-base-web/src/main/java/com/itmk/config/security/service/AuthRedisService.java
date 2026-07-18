@@ -2,6 +2,7 @@ package com.itmk.config.security.service;
 
 import com.itmk.config.redis.RedisService;
 import com.itmk.config.security.dto.AuthSessionDto;
+import com.itmk.config.security.dto.RefreshTokenDto;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -10,12 +11,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
-/** Redis 登录会话与一次性验证码。 */
+/** Redis 登录会话、一次性验证码与 RefreshToken。 */
 @Service
 public class AuthRedisService {
     private static final String SESSION_PREFIX = "auth:session:";
     private static final String USER_SESSIONS_PREFIX = "auth:user-sessions:";
     private static final String CAPTCHA_PREFIX = "auth:captcha:";
+    private static final String REFRESH_PREFIX = "refresh:";
+    private static final String REFRESH_USER_PREFIX = "refresh:user:";
 
     private final RedisService redisService;
 
@@ -74,5 +77,44 @@ public class AuthRedisService {
 
     private String captchaKey(String captchaId) {
         return CAPTCHA_PREFIX + captchaId;
+    }
+
+    // ────────── RefreshToken 管理 ──────────
+
+    /** 保存 RefreshToken，同时加入该用户的 Token 集合，方便批量管理。 */
+    public void saveRefreshToken(String token, RefreshTokenDto dto, Duration ttl) {
+        redisService.setJson(refreshKey(token), dto, ttl);
+        redisService.addToSet(refreshUserKey(dto.getUserId()), token, ttl);
+    }
+
+    /** 读取 RefreshToken 信息。 */
+    public RefreshTokenDto getRefreshToken(String token) {
+        return redisService.getJson(refreshKey(token), RefreshTokenDto.class);
+    }
+
+    /** 删除单个 RefreshToken（退出登录或刷新时调用）。 */
+    public void deleteRefreshToken(String token, Long userId) {
+        redisService.delete(refreshKey(token));
+        redisService.removeFromSet(refreshUserKey(userId), token);
+    }
+
+    /** 删除用户的所有 RefreshToken（修改密码、禁用、删除用户时调用）。 */
+    public void deleteAllRefreshTokens(Long userId) {
+        String userKey = refreshUserKey(userId);
+        Set<String> tokens = redisService.members(userKey);
+        List<String> keys = new ArrayList<>(tokens.size() + 1);
+        for (String token : tokens) {
+            keys.add(refreshKey(token));
+        }
+        keys.add(userKey);
+        redisService.delete(keys);
+    }
+
+    private String refreshKey(String token) {
+        return REFRESH_PREFIX + token;
+    }
+
+    private String refreshUserKey(Long userId) {
+        return REFRESH_USER_PREFIX + "{" + userId + "}";
     }
 }
