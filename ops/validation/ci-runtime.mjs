@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
 
 // Only for disposable CI/test databases. Captcha is seeded by the test harness,
 // without adding any bypass to the application's production login API.
@@ -32,11 +33,13 @@ assert.equal(login.status,200)
 const session=await login.json()
 assert.equal(session.code,200)
 assert.ok(session.data.token)
-const load=spawnSync(process.execPath,['ops/load/http-load.mjs'],{
-  env:{...process.env,LOAD_TOKEN:session.data.token},encoding:'utf8'
+// Keep the parent event loop alive while the load runs, so HTTP connection
+// closure/expiry events are processed before the subsequent audit query.
+const load=spawn(process.execPath,['ops/load/http-load.mjs'],{
+  env:{...process.env,LOAD_TOKEN:session.data.token},stdio:['ignore','inherit','inherit']
 })
-process.stdout.write(load.stdout||'')
-assert.equal(load.status,0,'Authenticated load thresholds failed')
+const [loadStatus]=await once(load,'exit')
+assert.equal(loadStatus,0,'Authenticated load thresholds failed')
 const audit=await fetch(new URL('/api/audit/list?currentPage=1&pageSize=10',base),{
   headers:{Authorization:`Bearer ${session.data.token}`}
 })

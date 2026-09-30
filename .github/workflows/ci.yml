@@ -79,7 +79,7 @@ jobs:
           api_pid=$!
           trap 'kill "$api_pid" 2>/dev/null || true' EXIT
           docker exec '${{ job.services.redis.id }}' redis-cli SET auth:captcha:ci-runtime CI123 EX 300
-          node ops/validation/ci-runtime.mjs
+          node ops/validation/ci-runtime.mjs || { tail -n 150 "$RUNNER_TEMP/api-console.log"; exit 1; }
       - name: Verify backup and restore against MySQL 8.4
         env:
           MYSQL_DEFAULTS_FILE: ${{ runner.temp }}/mysql-client.cnf
