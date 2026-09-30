@@ -7,7 +7,7 @@ export const useUserStore = defineStore('user', {
       userId:'',
       nickName:'',
       token:'',
-      codeList:[]
+      codeList:[] as string[]
     }
   },
   getters: {
@@ -50,7 +50,7 @@ export const useUserStore = defineStore('user', {
   persist: {
     key: 'useUserStore',
     storage: sessionStorage,
-    paths: ['userId','nickName','token'],  // 只持久化指定字段
+    pick: ['userId','nickName','token'],  // 只持久化指定字段
     serializer: {  // 自定义序列化
     serialize: JSON.stringify,
     deserialize: JSON.parse

@@ -51,7 +51,7 @@ public class CheckTokenFilter extends OncePerRequestFilter {
                                     FilterChain filterChain) throws ServletException, IOException {
         try {
             String uri = request.getRequestURI();
-            if (!ignoreUrl.contains(uri) && !uri.contains("/images/")) {
+            if (!ignoreUrl.contains(uri) && !"/api/sysUser/loginOut".equals(uri) && !uri.contains("/images/")) {
                 validateToken(request);
             }
         } catch (AuthenticationException e) {
@@ -90,6 +90,12 @@ public class CheckTokenFilter extends OncePerRequestFilter {
         PermissionDto permission = permissionCacheService.getOrLoad(userId, username);
         if (permission == null || !permission.isEnabled()) {
             throw new CustomerAuthenionException("账户不存在或已被禁用");
+        }
+
+        // 页面真实操作通过共享请求层标记；无操作的定时刷新和轮询不续期。
+        if ("1".equals(request.getHeader("X-Session-Activity"))
+                && !authRedisService.touchSession(userId, sessionId)) {
+            throw new CustomerAuthenionException("登录已失效，请重新登录");
         }
 
         UsernamePasswordAuthenticationToken authentication =

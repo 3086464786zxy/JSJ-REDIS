@@ -215,7 +215,7 @@ public class SysUserController {
         SysUser user = (SysUser)authentication.getPrincipal();
 
         String sessionId = UUID.randomUUID().toString();
-        Duration sessionTtl = Duration.ofMinutes(jwtUtils.getExpiration());
+        Duration sessionTtl = authRedisService.getSessionIdleTimeout();
         authRedisService.createSession(
                 sessionId,
                 new AuthSessionDto(user.getUserId(), user.getUsername(), System.currentTimeMillis()),
@@ -232,9 +232,10 @@ public class SysUserController {
         mp.put("sid", sessionId);
         String token = jwtUtils.generateToken(mp);
         vo.setToken(token);
+        vo.setIdleTimeoutSeconds(sessionTtl.toSeconds());
 
         // 签发 RefreshToken 并写入 httpOnly Cookie
-        String refreshToken = UUID.randomUUID().toString();
+        String refreshToken = authRedisService.newRefreshToken(user.getUserId());
         Duration refreshTtl = Duration.ofMinutes(jwtUtils.getRefreshExpiration());
         RefreshTokenDto refreshDto = new RefreshTokenDto(user.getUserId(), user.getUsername(), sessionId);
         authRedisService.saveRefreshToken(refreshToken, refreshDto, refreshTtl);
@@ -325,6 +326,7 @@ public class SysUserController {
             try {
                 RefreshTokenDto stored = authRedisService.getRefreshToken(refreshToken);
                 if (stored != null) {
+                    authRedisService.deleteSession(stored.getUserId(), stored.getSessionId());
                     authRedisService.deleteRefreshToken(refreshToken, stored.getUserId());
                 }
             } catch (RuntimeException ignored) {

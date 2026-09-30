@@ -7,4 +7,5 @@ public class LoginVo {
     private Long userId;
     private String nickName;
     private String token;
+    private long idleTimeoutSeconds;
 }

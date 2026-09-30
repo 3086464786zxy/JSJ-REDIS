@@ -24,7 +24,6 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8090/', //接口地址
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '')
       }
     }
   }

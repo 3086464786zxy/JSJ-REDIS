@@ -39,6 +39,7 @@ import {type FormInstance } from 'element-plus'
 import {useUserStore} from '@/store/user/index'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
+import { startSession } from '@/http/session'
 const router = useRouter()
 const userStore = useUserStore()
 //表单绑定对象
@@ -88,6 +89,7 @@ const commit = ()=>{
           userStore.setUserId(res.data.userId);
           userStore.setNickName(res.data.nickName);
           userStore.setToken(res.data.token);
+          startSession(res.data.token, res.data.idleTimeoutSeconds);
           router.push({path:'/'});
         }
       } catch {

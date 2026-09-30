@@ -6,7 +6,7 @@ import lombok.NoArgsConstructor;
 
 /**
  * 存储在 Redis 中的 RefreshToken 信息。
- * 刷新时通过 sessionId 关联旧会话，实现 Session Rotation。
+ * 刷新时通过 sessionId 校验同一会话，轮换凭证而不重建会话。
  */
 @Data
 @NoArgsConstructor
@@ -14,6 +14,6 @@ import lombok.NoArgsConstructor;
 public class RefreshTokenDto {
     private Long userId;
     private String username;
-    /** 关联的 Session ID，刷新时用于删除旧会话。 */
+    /** 关联的 Session ID，刷新不会更换或重新创建它。 */
     private String sessionId;
 }

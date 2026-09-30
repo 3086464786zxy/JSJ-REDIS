@@ -43,13 +43,11 @@ import {ref,reactive} from 'vue'
 import {type FormInstance } from 'element-plus';
 import { ElMessage } from 'element-plus';
 import {updatePasswordApi} from '@/api/user/index'
-import {useRouter} from 'vue-router'
 import { useUserStore } from '@/store/user';
 import useInstance from '@/hooks/useInstance';
-import { loginOutApi } from '@/api/user/index';
+import { endSession } from '@/http';
 const {global} = useInstance()
 const userStore = useUserStore()
-const router = useRouter()
 //表单属性
 const form = ref<FormInstance>()
 //弹框属性
@@ -65,14 +63,7 @@ const loginoutBtn = async () => {
   //信息确定
   const confirm = await global.$myconfirm('确定退出登录吗?');
   if (confirm) {
-    let res = await loginOutApi();
-    if (res && res.code == 200) {
-      //清空数据
-      sessionStorage.clear();
-      //跳转去登录
-      window.location.href = '/login';
-      //router.push({path: "/login"});
-    }
+    endSession();
   }
 }
 //表单对象
@@ -113,10 +104,7 @@ const commit = () => {
       let res = await updatePasswordApi(upModel);
       if (res && res.code == 200) {
         ElMessage.success(res.msg)
-        //清空缓存
-        sessionStorage.clear();
-        //跳转去登录
-        window.location.href = '/login';
+        endSession();
       }
     }
   })

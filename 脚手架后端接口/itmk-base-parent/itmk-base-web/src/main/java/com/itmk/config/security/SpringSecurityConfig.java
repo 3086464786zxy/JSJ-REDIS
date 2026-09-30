@@ -66,7 +66,8 @@ public class SpringSecurityConfig {
                 .authorizeHttpRequests((authorized ) ->authorized
                     // 这里过滤一些 不需要token的接口地址
                                 .requestMatchers("/api/sysUser/getImage",
-                                        "/api/sysUser/login","/api/upload/uploadImage","/images/**").permitAll()
+                                        "/api/sysUser/login", "/api/refresh", "/api/sysUser/loginOut",
+                                        "/api/upload/uploadImage","/images/**").permitAll()
                                 .anyRequest().authenticated()
                 )
                 //指定 登录鉴权时 查询用户信息的实现类
