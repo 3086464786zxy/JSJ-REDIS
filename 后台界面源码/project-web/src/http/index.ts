@@ -1,154 +1,128 @@
-import axios, {type AxiosInstance, type AxiosRequestConfig, type AxiosResponse, type InternalAxiosRequestConfig} from "axios"
-import { ElMessage } from "element-plus"
-import { useUserStore } from "@/store/user"
-//axios的配置项
-const config = {
-  //baseURL:'/api', //请求接口的地址
-  baseURL:'/api', //请求接口的地址
-  timeout:10000,
-  withCredentials: true
-}
-//定义返回值类型
-export interface Result<T = any> {
-  code:number,
-  msg:string,
-  data:T
-}
-class Http{
-  //axios实例
-  private instance:AxiosInstance;
-  //构造函数里边初始化
-  constructor(config: AxiosRequestConfig) {
-    this.instance = axios.create(config)
-    //定义拦截器
-    this.interceptors()
-  }
-  //拦截器
-  private interceptors() {
-    //axios发送请求之前的处理
-    this.instance.interceptors.request.use(
-      (config:InternalAxiosRequestConfig) => {
-        let userStore = useUserStore();
-        //在请求头部携带token
-        let token = userStore.getToken;
-        if (token) {
-          config.headers!['Authorization'] = `Bearer ${token}`
-        }
-        return config;
-      },
-      (error:any) => {
-        error.data = {}
-        error.data.msg = '服务器异常，请联系管理员!'
-        return error;
-      }
-    )
-    //请求返回之后的拦截器：可以根据后端返回的状态码，做想要提示
-    this.instance.interceptors.response.use(
-      (res: AxiosResponse) => {
-        const userStore = useUserStore();
-        if (res.data.code == 600) {
-          //跳转到登录
-          userStore.setToken('')
-          userStore.setUserId('')
-          sessionStorage.clear()
-          window.location.href = '/login'
-        } else if (res.data.code == 200) {
-          return res.data
-        } else {
-          ElMessage.error(res.data.msg || '服务器出错!')
-          return Promise.reject(res.data.msg || '服务器出错')
-        }
-      },
-      (error) => {
-        console.log('进入错误')
-        error.data = {};
-        if (error && error.response) {
-          switch (error.response.status) {
-            case 400:
-              error.data.msg = '错误请求';
-              ElMessage.error(error.data.msg)
-              break
-            case 401:
-              error.data.msg = '未授权，请重新登录';
-              ElMessage.error(error.data.msg)
-              break
-            case 403:
-              error.data.msg = '拒绝访问';
-              ElMessage.error(error.data.msg)
-              break
-            case 404:
-              error.data.msg = '请求错误,未找到接口';
-              ElMessage.error(error.data.msg)
-              break
-            case 405:
-              error.data.msg = '请求方法未允许';
-              ElMessage.error(error.data.msg)
-              break
-            case 408:
-              error.data.msg = '请求超时';
-              ElMessage.error(error.data.msg)
-              break
-            case 500:
-              error.data.msg = '服务器端出错';
-              ElMessage.error(error.data.msg)
-              break
-            case 501:
-              error.data.msg = '网络未实现';
-              ElMessage.error(error.data.msg)
-              break
-            case 502:
-              error.data.msg = '网络错误';
-              ElMessage.error(error.data.msg)
-              break
-            case 503:
-              error.data.msg = '服务不可用';
-              ElMessage.error(error.data.msg)
-              break
-            case 504:
-              error.data.msg = '网络超时';
-              ElMessage.error(error.data.msg)
-              break
-            case 505:
-              error.data.msg = 'http版本不支持该请求';
-              ElMessage.error(error.data.msg)
-              break
-            default:
-              error.data.msg = `连接错误${error.response.status}`;
-              ElMessage.error(error.data.msg)
-          }
-        } else {
-          error.data.msg = "连接到服务器失败";
-          ElMessage.error(error.data.msg)
-        }
-        return Promise.reject(error)
-      }
-    )
-  }
+import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
+import { ElMessage } from 'element-plus'
+import { useUserStore } from '@/store/user'
+import { acknowledgeActivity, clearSession, isSessionIdle, pendingActivity } from './session'
 
-  /* GET方法 */
-  get<T = Result>(url:string, params?:object) : Promise<T>{
-    return this.instance.get(url, {params})
-  }
-  /* POST方法 */
-  post<T = Result>(url:string, data?:Object) : Promise<T> {
-    return this.instance.post(url,data)
-  }
-  /* Put方法 */
-  put<T = Result>(url:string, data?:Object) : Promise<T> {
-    return this.instance.put(url,data)
-  }
-  /* DELETE方法 */
-  delete<T = Result>(url:string) : Promise<T> {
-    return this.instance.delete(url)
-  }
-  //图片上传
-  upload<T = Result>(url:string, params?: object) : Promise<T> {
-    return this.instance.post(url, params, {
-      headers: {
-        'Content-Type': 'multipart/from-data'
-        //'Content-Type': 'multipart/form-data'
+const config: AxiosRequestConfig = { baseURL: '', timeout: 10000, withCredentials: true }
+export interface Result<T = any> { code: number; msg: string; data: T }
+interface SessionRequest extends InternalAxiosRequestConfig { authRetried?: boolean; activityAt?: number }
+type RefreshResult = { accessToken: string; idleTimeoutSeconds: number }
+const publicEndpoints = new Set(['/api/sysUser/login', '/api/sysUser/getImage', '/api/refresh', '/api/sysUser/loginOut'])
+let exiting = false
+
+/** 清理 Pinia 和持久化数据，退出接口允许过期 JWT，并通过 Cookie 撤销会话。 */
+export function endSession(message = '') {
+  if (exiting) return
+  exiting = true
+  const token = useUserStore().getToken
+  useUserStore().$reset()
+  clearSession()
+  sessionStorage.clear()
+  if (message) ElMessage.warning(message)
+  void axios.post('/api/sysUser/loginOut', undefined, {
+    ...config, timeout: 3000, headers: token ? { Authorization: `Bearer ${token}` } : {},
+  }).catch(() => undefined).finally(() => window.location.replace('/login'))
+}
+
+class Http {
+  private instance: AxiosInstance
+  private refreshClient: AxiosInstance
+  private refreshPromise: Promise<string> | null = null
+
+  constructor(options: AxiosRequestConfig) {
+    this.instance = axios.create(options)
+    this.refreshClient = axios.create(options)
+    this.instance.interceptors.request.use((request: SessionRequest) => {
+      const token = useUserStore().getToken
+      if (!publicEndpoints.has(request.url || '') && token) {
+        if (isSessionIdle()) {
+          endSession('长时间未操作，请重新登录')
+          return Promise.reject(new Error('登录已失效'))
+        }
+        request.headers.set('Authorization', `Bearer ${token}`)
+        request.activityAt = pendingActivity()
+        if (request.activityAt) request.headers.set('X-Session-Activity', '1')
+        else request.headers.delete('X-Session-Activity')
       }
+      return request
+    })
+    this.instance.interceptors.response.use(async (response: AxiosResponse<Result>) => {
+      if (response.data.code === 600 || response.data.code === 401) {
+        return this.retryAfterRefresh(response.config as SessionRequest)
+      }
+      if (response.data.code !== 200) {
+        ElMessage.error(response.data.msg || '服务器出错')
+        return Promise.reject(new Error(response.data.msg || '服务器出错'))
+      }
+      acknowledgeActivity((response.config as SessionRequest).activityAt || 0)
+      return response.data as unknown as AxiosResponse
+    }, async (error: unknown) => {
+      if (axios.isAxiosError(error) && error.response?.status === 401 && error.config) {
+        return this.retryAfterRefresh(error.config as SessionRequest)
+      }
+      const message = axios.isAxiosError(error)
+        ? (error.response?.data?.msg || (error.code === 'ECONNABORTED' ? '请求超时，请稍后重试' : '请求失败，请检查网络或联系管理员'))
+        : '请求失败'
+      if (!exiting) ElMessage.error(message)
+      return Promise.reject(error)
     })
   }
+
+  private async retryAfterRefresh(request: SessionRequest): Promise<AxiosResponse> {
+    if (publicEndpoints.has(request.url || '')) {
+      return Promise.reject(new Error('认证失败'))
+    }
+    if (request.authRetried || exiting || isSessionIdle() || !useUserStore().getToken) {
+      endSession('登录已失效，请重新登录')
+      return Promise.reject(new Error('登录已失效'))
+    }
+    request.authRetried = true
+    const currentToken = useUserStore().getToken
+    // 较晚返回的旧请求使用已换发的 Token，不再刷新。
+    if (request.headers.get('Authorization') !== `Bearer ${currentToken}`) {
+      return this.instance.request(request)
+    }
+    if (!this.refreshPromise) {
+      const refresh = () => this.refreshAccessToken()
+      // 标签页之间共享 Cookie，Web Locks 防止同时轮换同一刷新凭证。
+      const operation = navigator.locks
+        ? navigator.locks.request('itmk:token-refresh', refresh).then((token) => token)
+        : refresh()
+      this.refreshPromise = operation.finally(() => { this.refreshPromise = null })
+    }
+    await this.refreshPromise
+    return this.instance.request(request)
+  }
+
+  private async refreshAccessToken(): Promise<string> {
+    if (exiting || isSessionIdle()) throw new Error('登录已失效')
+    try {
+      const response = await this.refreshClient.post<Result<RefreshResult>>('/api/refresh')
+      if (response.data.code === 401 || response.data.code === 600) {
+        endSession('登录已失效，请重新登录')
+        throw new Error(response.data.msg || '登录已失效')
+      }
+      if (response.data.code !== 200 || !response.data.data?.accessToken) {
+        throw new Error(response.data.msg || '登录续期失败')
+      }
+      if (exiting || isSessionIdle() || !useUserStore().getToken) throw new Error('登录已失效')
+      const token = response.data.data.accessToken
+      useUserStore().setToken(token)
+      return token
+    } catch (error) {
+      if (axios.isAxiosError(error) && (error.response?.status === 401 || error.response?.status === 403)) {
+        endSession('登录已失效，请重新登录')
+      } else if (!exiting) {
+        ElMessage.error('登录续期失败，请检查网络后重试')
+      }
+      throw error
+    }
+  }
+
+  get<T = Result>(url: string, params?: object): Promise<T> { return this.instance.get(url, { params }) }
+  post<T = Result>(url: string, data?: object): Promise<T> { return this.instance.post(url, data) }
+  put<T = Result>(url: string, data?: object): Promise<T> { return this.instance.put(url, data) }
+  delete<T = Result>(url: string): Promise<T> { return this.instance.delete(url) }
+  upload<T = Result>(url: string, params?: object): Promise<T> { return this.instance.post(url, params) }
 }
 export default new Http(config)

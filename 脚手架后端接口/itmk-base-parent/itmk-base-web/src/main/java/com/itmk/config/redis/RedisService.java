@@ -43,8 +43,12 @@ public class RedisService {
     }
 
     public void setJson(String key, Object value, Duration ttl) {
+        set(key, toJson(value), ttl);
+    }
+
+    public String toJson(Object value) {
         try {
-            set(key, objectMapper.writeValueAsString(value), ttl);
+            return objectMapper.writeValueAsString(value);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Redis JSON 序列化失败", e);
         }

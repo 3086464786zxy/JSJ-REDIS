@@ -19,6 +19,9 @@ import * as echarts from 'echarts'
 
 import App from './App.vue'
 import router from './router'
+import http, { endSession } from './http'
+import { installSessionActivity } from './http/session'
+import { useUserStore } from './store/user'
 
 const app = createApp(App)
 const pinia = createPinia()
@@ -27,11 +30,14 @@ app.use(ElementPlus, {
   locale: zhCn,
 })
 
-app.use(router)
 //app.directive('permission',permission)
 //app.config.globalProperties.$hasPerm = hasPerm
 //app.use(ElementPlus)
 app.use(pinia)
+installSessionActivity(useUserStore().getToken,
+  () => http.post('/api/session/activity'),
+  () => endSession('长时间未操作，请重新登录'))
+app.use(router)
 
 app.mount('#app')
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {

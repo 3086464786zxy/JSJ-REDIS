@@ -1,8 +1,9 @@
 package com.itmk.web.token.controller;
 
-import com.itmk.config.security.dto.AuthSessionDto;
+import com.itmk.config.security.dto.PermissionDto;
 import com.itmk.config.security.dto.RefreshTokenDto;
 import com.itmk.config.security.service.AuthRedisService;
+import com.itmk.config.security.service.PermissionCacheService;
 import com.itmk.jwt.JwtUtils;
 import com.itmk.utils.ResultUtils;
 import com.itmk.utils.ResultVo;
@@ -18,17 +19,17 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * Token 刷新接口，使用 RefreshToken（httpOnly Cookie）换取新的 AccessToken 和 RefreshToken。
- * 每次刷新伴随 Session Rotation：旧会话删除，新会话创建。
+ * 仅在 Redis 会话仍有效时刷新；刷新本身不延长闲置时间。
  */
 @RestController
 public class TokenController {
 
     private final JwtUtils jwtUtils;
     private final AuthRedisService authRedisService;
+    private final PermissionCacheService permissionCacheService;
 
     @Value("${app.security.refresh-token.cookie-name:refresh_token}")
     private String cookieName;
@@ -39,9 +40,11 @@ public class TokenController {
     @Value("${app.security.refresh-token.cookie-same-site:Lax}")
     private String cookieSameSite;
 
-    public TokenController(JwtUtils jwtUtils, AuthRedisService authRedisService) {
+    public TokenController(JwtUtils jwtUtils, AuthRedisService authRedisService,
+                           PermissionCacheService permissionCacheService) {
         this.jwtUtils = jwtUtils;
         this.authRedisService = authRedisService;
+        this.permissionCacheService = permissionCacheService;
     }
 
     @PostMapping("/api/refresh")
@@ -60,42 +63,43 @@ public class TokenController {
 
         Long userId = stored.getUserId();
         String username = stored.getUsername();
-        String oldSessionId = stored.getSessionId();
+        String sessionId = stored.getSessionId();
+        PermissionDto permission = permissionCacheService.getOrLoad(userId, username);
+        if (permission == null || !permission.isEnabled()) {
+            authRedisService.deleteSession(userId, sessionId);
+            authRedisService.deleteRefreshToken(oldRefreshToken, userId);
+            clearCookie(response);
+            return ResultUtils.error("账户不存在或已被禁用", 401);
+        }
 
-        // 2. Session Rotation：删除旧会话
-        authRedisService.deleteSession(userId, oldSessionId);
-
-        // 3. 创建新会话
-        String newSessionId = UUID.randomUUID().toString();
-        Duration sessionTtl = Duration.ofMinutes(jwtUtils.getExpiration());
-        authRedisService.createSession(
-                newSessionId,
-                new AuthSessionDto(userId, username, System.currentTimeMillis()),
-                sessionTtl
-        );
-
-        // 4. RefreshToken Rotation：删除旧 Token，签发新 Token
-        authRedisService.deleteRefreshToken(oldRefreshToken, userId);
-
-        String newRefreshToken = UUID.randomUUID().toString();
+        // 保持 sid 稳定，避免刷新导致其他标签页或并发请求的 JWT 失效。
+        String newRefreshToken = authRedisService.newRefreshToken(userId);
         Duration refreshTtl = Duration.ofMinutes(jwtUtils.getRefreshExpiration());
-        RefreshTokenDto newDto = new RefreshTokenDto(userId, username, newSessionId);
-        authRedisService.saveRefreshToken(newRefreshToken, newDto, refreshTtl);
-
-        // 5. 签发新 AccessToken（JWT，含新 sid）
         Map<String, String> claims = new HashMap<>();
         claims.put("userId", Long.toString(userId));
         claims.put("username", username);
-        claims.put("sid", newSessionId);
+        claims.put("sid", sessionId);
         String newAccessToken = jwtUtils.generateToken(claims);
+
+        // 原子检查会话未过期、旧刷新凭证未被使用，再轮换凭证。绝不重新创建失效会话。
+        if (!authRedisService.rotateRefreshToken(oldRefreshToken, newRefreshToken, stored, refreshTtl)) {
+            return ResultUtils.error("登录已失效，请重新登录", 401);
+        }
 
         // 6. 设置新 Cookie
         setCookie(response, newRefreshToken, refreshTtl);
 
         // 7. 返回新 AccessToken
-        Map<String, String> result = new HashMap<>();
+        Map<String, Object> result = new HashMap<>();
         result.put("accessToken", newAccessToken);
+        result.put("idleTimeoutSeconds", authRedisService.getSessionIdleTimeout().toSeconds());
         return ResultUtils.success("Token 刷新成功", result);
+    }
+
+    /** 由前端真实交互触发并节流，鉴权过滤器负责原子延长当前会话。 */
+    @PostMapping("/api/session/activity")
+    public ResultVo activity() {
+        return ResultUtils.success("会话有效");
     }
 
     // ────────── Cookie 工具方法 ──────────

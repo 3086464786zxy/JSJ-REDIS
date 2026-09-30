@@ -21,14 +21,16 @@ jwt:
   audience: itmk-api
   #生产环境必须通过 JWT_SECRET 环境变量提供至少 32 字节的随机密钥
   secret: ${JWT_SECRET:change-this-development-secret-at-least-32-bytes}
-  #Access Token 30分钟过期
-  expiration: 30
+  #Access Token 15分钟过期，持续操作时由 RefreshToken 换发
+  expiration: 15
   #Refresh Token 7天过期（分钟）
   refresh-expiration: 10080
 
 #认证缓存和限流参数，可按压测结果通过环境配置覆盖
 app:
   security:
+    # 仅限制连续闲置时间；持续有效操作没有最长登录时限
+    session-idle-timeout-minutes: 30
     captcha-ttl-seconds: 120
     permission-ttl-seconds: 900
     permission-ttl-jitter-seconds: 180
@@ -43,7 +45,7 @@ app:
 
 #不需要token验证的请求，逗号分隔配置
 ignore:
-  url: /api/sysUser/login,/api/sysUser/getImage,/api/refresh
+  url: /api/sysUser/login,/api/sysUser/getImage,/api/refresh,/api/sysUser/loginOut
 
 #mybatis plus配置
 mybatis-plus:

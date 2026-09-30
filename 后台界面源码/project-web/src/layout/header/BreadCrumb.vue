@@ -16,7 +16,7 @@ const getBredcrumb = ()=>{
   //获取第一个数据
   const first = mached[0]
   //判断第一个数据是否是首页，不是自己构造
-  if( first.path !== '/dashboard') {
+  if( first?.path !== '/dashboard') {
     mached = [{path:'/dashboard',meta:{title:'首页'}} as any].concat(mached)
   }
   tabs.value = mached;

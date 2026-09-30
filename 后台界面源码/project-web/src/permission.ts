@@ -14,7 +14,7 @@ router.beforeEach(async (to,from,next)=>{
   //判断token是否存在
   if (token) {
     //判断是否是登录或首页来的: 是放行， 不是: 从服务器获取菜单数据
-    if (to.path === '/login' || to.path === '/') {
+    if (to.path === '/login') {
       next({path:'/'});
     } else {
       //判断权限数据是否存在
@@ -35,9 +35,9 @@ router.beforeEach(async (to,from,next)=>{
           //等待路由完全挂载
           next({ ...to, replace: true });
         } catch {
-          //清空数据
-          sessionStorage.clear();
-          next({path:'/login'})
+          // 认证失效由 HTTP 层统一退出；网络异常不清空仍有效的会话。
+          if (userStore.getToken) next(false);
+          else next({path:'/login'});
         }
       }
     }

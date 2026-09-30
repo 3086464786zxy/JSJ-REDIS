@@ -38,7 +38,7 @@ export const useTabStore = defineStore('useTabStore',{
     key: 'useTabStore',
     //storage: localStorage,
     storage: sessionStorage,
-    paths: ['tabList'],  // 只持久化指定字段
+    pick: ['tabList'],  // 只持久化指定字段
     serializer: {  // 自定义序列化
       serialize: JSON.stringify,
       deserialize: JSON.parse
