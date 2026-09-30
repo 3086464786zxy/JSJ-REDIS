@@ -14,8 +14,6 @@ import myconfirm from './utils/myconfirm'
 import hasPerm from './directive/hasPerm'
 //权限验证
 import './permission'
-//echarts
-import * as echarts from 'echarts'
 
 import App from './App.vue'
 import router from './router'
@@ -47,4 +45,3 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
 //全局属性的使用
 app.config.globalProperties.$myconfirm = myconfirm;
 app.config.globalProperties.$hasPerm = hasPerm
-app.config.globalProperties.$echarts = echarts;

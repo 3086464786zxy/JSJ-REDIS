@@ -80,7 +80,6 @@ const selectAll = (isAll: boolean) => {
       item.check = true;
       selectedOptions.value.push(item.value);
     });
-    console.log(selectedOptions.value);
   } else {
     let arr: Array<string | number> = [];
     props.options.forEach((item) => {

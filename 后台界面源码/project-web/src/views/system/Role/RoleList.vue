@@ -111,7 +111,6 @@ const rules = reactive({
 //编辑按钮
 const editBtn = (row:SysRole) => {
   tags.value = '1';
-  console.log(row);
   //显示弹窗
   dialog.visible = true;
   dialog.title = '编辑';
@@ -129,10 +128,7 @@ const assignBtn = (row:SysRole) => {
 }
 //删除按钮
 const deleteBtn = async (roleId:string) => {
-  console.log(roleId);
-  console.log(global);
   const confirm = await global.$myconfirm('确定删除该数据吗?');
-  console.log(confirm)
   if (confirm) {
     let res = await deleteApi(roleId)
     if (res.code && res.code == 200) {
@@ -156,7 +152,6 @@ const currentChange = (page:number)=>{
 const commit = () => {
   addRef.value?.validate(async (valid) => {
     if (valid) {
-      console.log('表单验证通过');
       //提交请求
       let res = null;
       if (tags.value == '0') {
@@ -183,7 +178,6 @@ const getList = async ()=>{
   let res = await getListApi(searchParm)
   if (res && res.code == 200) {
     //设置表格数据
-    console.log(res)
     tableList.value = res.data.records
     //设置分页总条数
     searchParm.total = res.data.total

@@ -3,14 +3,14 @@
 <mapper namespace="com.itmk.web.sys_menu.mapper.SysMenuMapper">
     <select id="getMenuByUserId" resultType="com.itmk.web.sys_menu.entity.SysMenu">
         select DISTINCT m.* from sys_user_role as ur
-        left join sys_role as r on ur.role_id = r.role_id
-        left join sys_role_menu as rm on r.role_id = rm.role_id
-        left join sys_menu as m on rm.menu_id = m.menu_id
+        inner join sys_role as r on ur.role_id = r.role_id
+        inner join sys_role_menu as rm on r.role_id = rm.role_id
+        inner join sys_menu as m on rm.menu_id = m.menu_id
         where ur.user_id = #{userId}
-        order by order_num asc;
+        order by m.order_num asc;
     </select>
     <select id="getMenuByRoleId" resultType="com.itmk.web.sys_menu.entity.SysMenu">
-        select m.* from sys_role_menu as rm
+        select DISTINCT m.* from sys_role_menu as rm
         inner join sys_menu as m on rm.menu_id = m.menu_id
         where rm.role_id = #{roleId};
     </select>

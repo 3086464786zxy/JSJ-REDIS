@@ -1,11 +1,11 @@
 package com.itmk.web.sys_user.controller;
 
+import com.auth0.jwt.interfaces.DecodedJWT;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.google.code.kaptcha.impl.DefaultKaptcha;
-import com.auth0.jwt.interfaces.DecodedJWT;
 import com.itmk.config.security.dto.AuthSessionDto;
 import com.itmk.config.security.dto.RefreshTokenDto;
 import com.itmk.config.security.filter.CheckTokenFilter;
@@ -18,11 +18,18 @@ import com.itmk.utils.ResultVo;
 import com.itmk.web.sys_menu.entity.SysMenu;
 import com.itmk.web.sys_menu.service.SysMenuService;
 import com.itmk.web.sys_user.entity.*;
+import com.itmk.web.sys_user.service.SysUserService;
 import com.itmk.web.sys_user_role.entity.SysUserRole;
 import com.itmk.web.sys_user_role.service.SysUserRoleService;
-import com.itmk.web.sys_user.service.SysUserService;
-import org.apache.commons.lang.StringUtils;
+
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -32,56 +39,49 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.authentication.logout.SecurityContextLogoutHandler;
 import org.springframework.web.bind.annotation.*;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.ResponseCookie;
-import javax.imageio.ImageIO;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
-
-import java.io.ByteArrayOutputStream;
 import java.util.stream.Collectors;
+
+import javax.imageio.ImageIO;
 
 @RequestMapping("/api/sysUser")
 @RestController
 public class SysUserController {
-    @Autowired
-    private SysUserService sysUserService;
-    @Autowired
-    private SysUserRoleService sysUserRoleService;
-    @Autowired
-    private DefaultKaptcha defaultKaptcha;
-    @Autowired
-    private JwtUtils jwtUtils;
-    @Autowired
-    private SysMenuService sysMenuService;
-    @Autowired
-    private AuthenticationManager authenticationManager;
-    @Autowired
-    private PasswordEncoder passwordEncoder;
-    @Autowired
-    private AuthRedisService authRedisService;
-    @Autowired
-    private PermissionCacheService permissionCacheService;
-    @Autowired
-    private RateLimitService rateLimitService;
+    @Autowired private SysUserService sysUserService;
+    @Autowired private SysUserRoleService sysUserRoleService;
+    @Autowired private DefaultKaptcha defaultKaptcha;
+    @Autowired private JwtUtils jwtUtils;
+    @Autowired private SysMenuService sysMenuService;
+    @Autowired private AuthenticationManager authenticationManager;
+    @Autowired private PasswordEncoder passwordEncoder;
+    @Autowired private AuthRedisService authRedisService;
+    @Autowired private PermissionCacheService permissionCacheService;
+    @Autowired private RateLimitService rateLimitService;
 
     @Value("${app.security.refresh-token.cookie-name:refresh_token}")
     private String cookieName;
+
     @Value("${app.security.refresh-token.cookie-secure:false}")
     private boolean cookieSecure;
+
     @Value("${app.security.refresh-token.cookie-same-site:Lax}")
     private String cookieSameSite;
 
-    //新增
+    @Autowired private com.itmk.config.security.service.ManagementPolicy managementPolicy;
+
+    // 新增
     @PreAuthorize("hasAuthority('sys:user:add')")
     @PostMapping
-    public ResultVo add(@RequestBody SysUser sysUser) {
+    public ResultVo add(@jakarta.validation.Valid @RequestBody UserWriteParm parm) {
+        if (parm.getUserId() != null) throw new IllegalArgumentException("新增用户不能指定ID");
+        com.itmk.config.security.service.PasswordPolicy.validate(parm.getPassword());
+        SysUser sysUser = parm.toUser();
+        sysUser.setPassword(parm.getPassword());
         QueryWrapper<SysUser> queryWrapper = new QueryWrapper<>();
         queryWrapper.lambda().eq(SysUser::getUsername, sysUser.getUsername());
         SysUser res = sysUserService.getOne(queryWrapper);
@@ -89,27 +89,33 @@ public class SysUserController {
             return ResultUtils.error("该账户已存在");
         }
         sysUser.setIsAdmin("0");
-        //密码加密
+        // 密码加密
         sysUser.setPassword(passwordEncoder.encode(sysUser.getPassword()));
         sysUser.setCreateTime(LocalDateTime.now());
         sysUserService.saveUser(sysUser);
         return ResultUtils.success("新增成功!");
     }
 
-    //编辑
+    // 编辑
     @PreAuthorize("hasAuthority('sys:user:edit')")
     @PutMapping
-    public ResultVo edit(@RequestBody SysUser sysUser) {
+    public ResultVo edit(@jakarta.validation.Valid @RequestBody UserWriteParm parm) {
+        if (parm.getUserId() == null) throw new IllegalArgumentException("用户ID不能为空");
+        if (parm.getPassword() != null && !parm.getPassword().isEmpty())
+            throw new IllegalArgumentException("编辑用户请通过密码修改接口修改密码");
+        managementPolicy.assertUser(parm.getUserId(), false);
+        SysUser sysUser = parm.toUser();
         sysUser.setUpdateTime(LocalDateTime.now());
         sysUserService.editUser(sysUser);
         permissionCacheService.invalidateUser(sysUser.getUserId());
         return ResultUtils.success("编辑成功!");
     }
 
-    //删除
+    // 删除
     @PreAuthorize("hasAuthority('sys:user:delete')")
     @DeleteMapping("/{userId}")
     public ResultVo delete(@PathVariable("userId") Long userId) {
+        managementPolicy.assertUser(userId, true);
         sysUserService.deleteUser(userId);
         permissionCacheService.invalidateUser(userId);
         authRedisService.deleteAllSessions(userId);
@@ -117,47 +123,58 @@ public class SysUserController {
         return ResultUtils.success("删除成功");
     }
 
-    //列表
+    // 列表
+    @PreAuthorize(
+            "hasAnyAuthority('sys:user','sys:user:list','sys:user:add','sys:user:edit','sys:user:delete','sys:user:reset')")
     @GetMapping("/list")
-    public ResultVo list(SysUserPage parm) {
-        //构造分页对象
+    public ResultVo list(@jakarta.validation.Valid SysUserPage parm) {
+        // 构造分页对象
         IPage<SysUser> page = new Page<>(parm.getCurrentPage(), parm.getPageSize());
-        //构造查询对象
+        // 构造查询对象
         QueryWrapper<SysUser> queryWrapper = new QueryWrapper<>();
         if (StringUtils.isNotEmpty(parm.getNickname())) {
             queryWrapper.lambda().like(SysUser::getNickName, parm.getNickname());
         }
-        if(StringUtils.isNotEmpty(parm.getPhone())) {
+        if (StringUtils.isNotEmpty(parm.getPhone())) {
             queryWrapper.lambda().like(SysUser::getPhone, parm.getPhone());
         }
+        queryWrapper.select(SysUser.class, field -> !"password".equals(field.getProperty()));
         queryWrapper.lambda().orderByDesc(SysUser::getCreateTime);
-        //列表查询
+        // 列表查询
         IPage<SysUser> list = sysUserService.page(page, queryWrapper);
-        return ResultUtils.success("查询成功",list);
+        return ResultUtils.success("查询成功", list);
     }
 
-    //根据用户id查询用户的角色
+    // 根据用户id查询用户的角色
+    @PreAuthorize("hasAnyAuthority('sys:user:add','sys:user:edit')")
     @GetMapping("/getRoleList")
     public ResultVo getRoleList(Long userId) {
         QueryWrapper<SysUserRole> queryWrapper = new QueryWrapper<>();
         queryWrapper.lambda().eq(SysUserRole::getUserId, userId);
         List<SysUserRole> list = sysUserRoleService.list(queryWrapper);
         List<Long> roleList = new ArrayList<>();
-        Optional.ofNullable(list).orElse(new ArrayList<>())
-                .forEach(item -> {
-                    roleList.add(item.getRoleId());
-                });
-        return ResultUtils.success("查询成功!",roleList);
+        Optional.ofNullable(list)
+                .orElse(new ArrayList<>())
+                .forEach(
+                        item -> {
+                            roleList.add(item.getRoleId());
+                        });
+        return ResultUtils.success("查询成功!", roleList);
     }
 
-    //重置密码
+    // 重置密码
     @PreAuthorize("hasAuthority('sys:user:reset')")
     @PostMapping("/resetPassword")
-    public ResultVo resetPassword(@RequestBody SysUser sysUser) {
+    public ResultVo resetPassword(
+            @jakarta.validation.Valid @RequestBody ResetPasswordParm sysUser) {
+        managementPolicy.assertUser(sysUser.getUserId(), false);
+        com.itmk.config.security.service.PasswordPolicy.validate(sysUser.getPassword());
         UpdateWrapper<SysUser> updateWrapper = new UpdateWrapper<>();
-        updateWrapper.lambda().eq(SysUser::getUserId, sysUser.getUserId())
-                .set(SysUser::getPassword, passwordEncoder.encode("666666"));
-        if(sysUserService.update(updateWrapper)) {
+        updateWrapper
+                .lambda()
+                .eq(SysUser::getUserId, sysUser.getUserId())
+                .set(SysUser::getPassword, passwordEncoder.encode(sysUser.getPassword()));
+        if (sysUserService.update(updateWrapper)) {
             authRedisService.deleteAllSessions(sysUser.getUserId());
             authRedisService.deleteAllRefreshTokens(sysUser.getUserId());
             return ResultUtils.success("密码重置成功!");
@@ -165,7 +182,7 @@ public class SysUserController {
         return ResultUtils.error("密码重置失败!");
     }
 
-    //图片验证码
+    // 图片验证码
     @PostMapping("/getImage")
     public ResultVo imageCode(HttpServletRequest request) {
         if (!rateLimitService.allowCaptcha(request)) {
@@ -189,9 +206,10 @@ public class SysUserController {
         }
     }
 
-    //登录
+    // 登录
     @PostMapping("/login")
-    public ResultVo login(HttpServletRequest request, HttpServletResponse response, @RequestBody LoginParm parm) {
+    public ResultVo login(
+            HttpServletRequest request, HttpServletResponse response, @RequestBody LoginParm parm) {
         if (!rateLimitService.allowLogin(request, parm.getUsername())) {
             return ResultUtils.error("登录尝试过于频繁，请稍后再试", 429);
         }
@@ -212,23 +230,23 @@ public class SysUserController {
                 new UsernamePasswordAuthenticationToken(parm.getUsername(), parm.getPassword());
         Authentication authentication = authenticationManager.authenticate(authenticationToken);
         SecurityContextHolder.getContext().setAuthentication(authentication);
-        SysUser user = (SysUser)authentication.getPrincipal();
+        SysUser user = (SysUser) authentication.getPrincipal();
 
         String sessionId = UUID.randomUUID().toString();
         Duration sessionTtl = authRedisService.getSessionIdleTimeout();
         authRedisService.createSession(
                 sessionId,
-                new AuthSessionDto(user.getUserId(), user.getUsername(), System.currentTimeMillis()),
-                sessionTtl
-        );
+                new AuthSessionDto(
+                        user.getUserId(), user.getUsername(), System.currentTimeMillis()),
+                sessionTtl);
         permissionCacheService.cacheLoginUser(user);
 
         LoginVo vo = new LoginVo();
         vo.setUserId(user.getUserId());
         vo.setNickName(user.getNickName());
-        Map<String,String> mp = new HashMap<>();
-        mp.put("userId",Long.toString(user.getUserId()));
-        mp.put("username",user.getUsername());
+        Map<String, String> mp = new HashMap<>();
+        mp.put("userId", Long.toString(user.getUserId()));
+        mp.put("username", user.getUsername());
         mp.put("sid", sessionId);
         String token = jwtUtils.generateToken(mp);
         vo.setToken(token);
@@ -237,35 +255,42 @@ public class SysUserController {
         // 签发 RefreshToken 并写入 httpOnly Cookie
         String refreshToken = authRedisService.newRefreshToken(user.getUserId());
         Duration refreshTtl = Duration.ofMinutes(jwtUtils.getRefreshExpiration());
-        RefreshTokenDto refreshDto = new RefreshTokenDto(user.getUserId(), user.getUsername(), sessionId);
+        RefreshTokenDto refreshDto =
+                new RefreshTokenDto(user.getUserId(), user.getUsername(), sessionId);
         authRedisService.saveRefreshToken(refreshToken, refreshDto, refreshTtl);
         setRefreshCookie(response, refreshToken, refreshTtl);
 
-        return ResultUtils.success("登录成功",vo);
+        return ResultUtils.success("登录成功", vo);
     }
 
-    //查询菜单树
+    // 查询菜单树
     @PreAuthorize("hasAuthority('sys:role:assign')")
     @GetMapping("/getAssingTree")
     public ResultVo getAssingTree(AssignTreeParm assignTreeParm) {
-        System.out.println("getSSINGtREE");
+        assignTreeParm.setUserId(managementPolicy.actor().getUserId());
+        managementPolicy.assertRole(assignTreeParm.getRoleId());
         AssignTreeVo assignTreeVo = sysUserService.getAssignTreeVo(assignTreeParm);
-        return ResultUtils.success("查询成功",assignTreeVo);
+        return ResultUtils.success("查询成功", assignTreeVo);
     }
 
     @PostMapping("/updatePassword")
-    public ResultVo updatePassword(HttpServletRequest request, @RequestBody UpdatePasswordParm parm) {
+    public ResultVo updatePassword(
+            HttpServletRequest request, @RequestBody UpdatePasswordParm parm) {
+        com.itmk.config.security.service.PasswordPolicy.validate(parm.getPassword());
+        if (parm.getOldPassword() == null) throw new IllegalArgumentException("原密码不能为空");
         Long currentUserId = extractUserId(request);
         SysUser sysUser = sysUserService.getById(currentUserId);
-        //if (!sysUser.getPassword().equals(parm.getOldPassword())) {
+        // if (!sysUser.getPassword().equals(parm.getOldPassword())) {
         //    return ResultUtils.error("原密码不正确");
-        //}
+        // }
         if (!passwordEncoder.matches(parm.getOldPassword(), sysUser.getPassword())) {
             return ResultUtils.error("原密码不正确!");
         }
-        //更新条件
+        // 更新条件
         UpdateWrapper<SysUser> updateWrapper = new UpdateWrapper<>();
-        updateWrapper.lambda().set(SysUser::getPassword,passwordEncoder.encode(parm.getPassword()))
+        updateWrapper
+                .lambda()
+                .set(SysUser::getPassword, passwordEncoder.encode(parm.getPassword()))
                 .eq(SysUser::getUserId, currentUserId);
         if (sysUserService.update(updateWrapper)) {
             authRedisService.deleteAllSessions(currentUserId);
@@ -275,36 +300,39 @@ public class SysUserController {
         return ResultUtils.error("密码修改失败!");
     }
 
-    //获取当前用户的信息
+    // 获取当前用户的信息
     @GetMapping("/getUserInfo")
     public ResultVo getUserInfo(HttpServletRequest request) {
         Long currentUserId = extractUserId(request);
-        //根据id查询用户信息
+        // 根据id查询用户信息
         SysUser user = sysUserService.getById(currentUserId);
         List<SysMenu> menuList = null;
-        //判断是否是超级管理员
+        // 判断是否是超级管理员
         if (StringUtils.isNotEmpty(user.getIsAdmin()) && "1".equals(user.getIsAdmin())) {
-            //超级管理员,直接查询得到所有菜单
+            // 超级管理员,直接查询得到所有菜单
             menuList = sysMenuService.list();
         } else {
             menuList = sysMenuService.getMenuByUserId(currentUserId);
         }
-        //获取菜单表的code字段
-        List<String> collect = Optional.ofNullable(menuList).orElse(new ArrayList<>())
-                .stream()
-                .filter(Objects::nonNull)
-                .filter(item -> StringUtils.isNotEmpty(item.getCode()))
-                .map(item -> item.getCode())
-                .collect(Collectors.toList());
-        //设置返回值
+        // 获取菜单表的code字段
+        List<String> collect =
+                Optional.ofNullable(menuList).orElse(new ArrayList<>()).stream()
+                        .filter(Objects::nonNull)
+                        .filter(item -> StringUtils.isNotEmpty(item.getCode()))
+                        .flatMap(item -> java.util.Arrays.stream(item.getCode().split(",")))
+                        .map(String::trim)
+                        .filter(code -> !code.isEmpty())
+                        .distinct()
+                        .collect(Collectors.toList());
+        // 设置返回值
         UserInfo userInfo = new UserInfo();
         userInfo.setName(user.getNickName());
         userInfo.setUserId(user.getUserId());
         userInfo.setPermissions(collect.toArray());
-        return ResultUtils.success("查询成功",userInfo);
+        return ResultUtils.success("查询成功", userInfo);
     }
 
-    //退出登录
+    // 退出登录
     @PostMapping("/loginOut")
     public ResultVo loginOut(HttpServletRequest request, HttpServletResponse response) {
         // 1. 尝试从 JWT 中解析并删除 Redis 会话
@@ -353,24 +381,26 @@ public class SysUserController {
     // ────────── Cookie 工具方法 ──────────
 
     private void setRefreshCookie(HttpServletResponse response, String value, Duration maxAge) {
-        ResponseCookie cookie = ResponseCookie.from(cookieName, value)
-                .httpOnly(true)
-                .secure(cookieSecure)
-                .sameSite(cookieSameSite)
-                .path("/api/")
-                .maxAge(maxAge)
-                .build();
+        ResponseCookie cookie =
+                ResponseCookie.from(cookieName, value)
+                        .httpOnly(true)
+                        .secure(cookieSecure)
+                        .sameSite(cookieSameSite)
+                        .path("/api/")
+                        .maxAge(maxAge)
+                        .build();
         response.setHeader(HttpHeaders.SET_COOKIE, cookie.toString());
     }
 
     private void clearRefreshCookie(HttpServletResponse response) {
-        ResponseCookie cookie = ResponseCookie.from(cookieName, "")
-                .httpOnly(true)
-                .secure(cookieSecure)
-                .sameSite(cookieSameSite)
-                .path("/api/")
-                .maxAge(0)
-                .build();
+        ResponseCookie cookie =
+                ResponseCookie.from(cookieName, "")
+                        .httpOnly(true)
+                        .secure(cookieSecure)
+                        .sameSite(cookieSameSite)
+                        .path("/api/")
+                        .maxAge(0)
+                        .build();
         response.setHeader(HttpHeaders.SET_COOKIE, cookie.toString());
     }
 

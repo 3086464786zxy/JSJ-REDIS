@@ -119,7 +119,7 @@
 import {ref,reactive,onMounted, nextTick} from 'vue'
 import SysDialog from '@/components/SysDialog.vue'
 import useDialog from '@/hooks/useDialog'
-import { ElMessage, type FormInstance } from 'element-plus';
+import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus';
 import SelectChecked from '@/components/SelectChecked.vue'
 import {getSelectApi} from '@/api/role/index'
 import {addApi,getListApi,getRoleListApi,editApi,deleteApi,resetPasswordApi} from '@/api/user/index'
@@ -207,7 +207,8 @@ const rules = reactive({
   password:[{
     required:true,
     trigger:['blur','change'],
-    message:'请输入密码',
+    min:12, max:64,
+    message:'请输入12至64个字符的密码',
   }],
   username:[{
     required:true,
@@ -224,9 +225,7 @@ const rules = reactive({
 const commit = ()=>{
   //验证表单
   addForm.value?.validate( async (valid)=>{
-    console.log(addModel)
     if (valid) {
-      console.log('验证通过')
       let res = null;
       if (btnTags.value == '0') {
         res = await addApi(addModel);
@@ -248,7 +247,6 @@ let options = ref([])
 const selected = (value: Array<string | number>) => {
   //console.log(value.join(','));
   addModel.roleId = value.join(',')
-  console.log(addModel.roleId)
 }
 //查询角色下拉数据
 const getSelect = async()=>{
@@ -295,7 +293,7 @@ const editBtn = async (row:SysUser)=>{
   onShow();
   nextTick(()=>{
     //数据回显
-    Object.assign(addModel,row);
+    for (const key of Object.keys(addModel) as (keyof typeof addModel)[]) addModel[key] = row[key] || "";
     //设置角色的id
     addModel.roleId = roleIds.value;
     //编辑完后密码设为空，防止新增时候密码不为空
@@ -306,18 +304,19 @@ const editBtn = async (row:SysUser)=>{
 }
 //重置密码
 const resetPasswordBtn = async (userId:string) => {
-  const confirm = await global.$myconfirm('确定重置密码,重置后密码为: 666666');
-  if (confirm) {
-    let res = await resetPasswordApi({userId:userId});
-    if (res && res.code == 200) {
-      ElMessage.success(res.msg);
-      getList();
-    }
+  try {
+    const {value} = await ElMessageBox.prompt('设置12至64个字符的新密码（UTF-8最多72字节）', '重置密码', {
+      inputType: 'password', confirmButtonText: '重置', cancelButtonText: '取消',
+      inputValidator: (value: string) => value && value.length >= 12 && value.length <= 64 && new TextEncoder().encode(value).length <= 72 || '密码不符合长度要求',
+    });
+    const res = await resetPasswordApi({userId,password:value});
+    if (res && res.code == 200) ElMessage.success(res.msg);
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') { /* 请求层显示错误 */ }
   }
 }
 //删除
 const deleteBtn = async (userId:string)=>{
-  console.log(userId);
   const confirm = await global.$myconfirm('确定删除该数据吗?');
   if (confirm) {
     let res = await deleteApi(userId);

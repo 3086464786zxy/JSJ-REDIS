@@ -238,3 +238,38 @@ test('无操作已超时时，不发送刷新请求', async () => {
   assert.equal(h.requests.filter((r) => r.url === '/api/refresh').length, 0)
 })
 
+test('所有写请求、刷新和退出都携带跨站保护请求头', async () => {
+  const h = await harness(async (request) => {
+    if (request.url === '/api/refresh') return { code: 200, data: { accessToken: tokenFor('session', 'new') } }
+    if (request.url === '/api/protected' && request.headers.get('Authorization') === 'Bearer ' + tokenFor('session')) return { code: 600 }
+    return { code: 200 }
+  })
+  await h.http.default.post('/api/write', {})
+  await h.http.default.put('/api/write', {})
+  await h.http.default.delete('/api/write')
+  await h.http.default.get('/api/protected')
+  h.http.endSession(); await flush()
+  for (const request of h.requests) assert.equal(request.headers.get('X-Requested-With'), 'XMLHttpRequest')
+  assert.ok(h.requests.some(request => request.url === '/api/refresh'))
+  assert.ok(h.requests.some(request => request.url === '/api/sysUser/loginOut'))
+})
+
+test('数据服务 HTTP 503 不会触发刷新或清空会话', async () => {
+  const h = await harness(async (request) => {
+    throw new AxiosError('unavailable', 'ERR_BAD_RESPONSE', request, null, { status: 503, config: request, data: { msg: '暂时不可用' } })
+  })
+  await assert.rejects(h.http.default.get('/api/protected'))
+  assert.equal(h.store.token, tokenFor('session'))
+  assert.equal(h.requests.length, 1)
+  assert.equal(h.redirects.length, 0)
+})
+
+test('登录 HTTP 401 显示服务端提示并且不刷新旧会话', async () => {
+  const h = await harness(async (request) => {
+    throw new AxiosError('invalid', 'ERR_BAD_REQUEST', request, null, { status: 401, config: request, data: { msg: '账号、密码错误或账户不可用' } })
+  })
+  await assert.rejects(h.http.default.post('/api/sysUser/login', {}))
+  assert.ok(h.messages.includes('账号、密码错误或账户不可用'))
+  assert.equal(h.requests.length, 1)
+})
+

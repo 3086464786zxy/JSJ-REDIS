@@ -8,10 +8,12 @@ import com.itmk.config.security.handler.LoginFailureHandler;
 import com.itmk.config.security.service.AuthRedisService;
 import com.itmk.config.security.service.PermissionCacheService;
 import com.itmk.jwt.JwtUtils;
+
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.AuthenticationException;
@@ -35,10 +37,11 @@ public class CheckTokenFilter extends OncePerRequestFilter {
     private final PermissionCacheService permissionCacheService;
     private final LoginFailureHandler loginFailureHandler;
 
-    public CheckTokenFilter(JwtUtils jwtUtils,
-                            AuthRedisService authRedisService,
-                            PermissionCacheService permissionCacheService,
-                            LoginFailureHandler loginFailureHandler) {
+    public CheckTokenFilter(
+            JwtUtils jwtUtils,
+            AuthRedisService authRedisService,
+            PermissionCacheService permissionCacheService,
+            LoginFailureHandler loginFailureHandler) {
         this.jwtUtils = jwtUtils;
         this.authRedisService = authRedisService;
         this.permissionCacheService = permissionCacheService;
@@ -46,14 +49,19 @@ public class CheckTokenFilter extends OncePerRequestFilter {
     }
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request,
-                                    HttpServletResponse response,
-                                    FilterChain filterChain) throws ServletException, IOException {
+    protected void doFilterInternal(
+            HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
         try {
             String uri = request.getRequestURI();
-            if (!ignoreUrl.contains(uri) && !"/api/sysUser/loginOut".equals(uri) && !uri.contains("/images/")) {
+            if (!ignoreUrl.contains(uri)
+                    && !"/api/sysUser/loginOut".equals(uri)
+                    && !uri.startsWith("/images/")) {
                 validateToken(request);
             }
+        } catch (org.springframework.dao.DataAccessException e) {
+            loginFailureHandler.unavailable(response);
+            return;
         } catch (AuthenticationException e) {
             loginFailureHandler.commence(request, response, e);
             return;
@@ -100,10 +108,10 @@ public class CheckTokenFilter extends OncePerRequestFilter {
 
         UsernamePasswordAuthenticationToken authentication =
                 new UsernamePasswordAuthenticationToken(
-                        permission.getUsername(), null, permission.toAuthorities()
-                );
+                        permission.getUsername(), null, permission.toAuthorities());
         authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
         SecurityContextHolder.getContext().setAuthentication(authentication);
+        request.setAttribute("audit.userId", userId);
     }
 
     /** 优先使用标准 Bearer Header，暂时兼容旧的 token Header。 */

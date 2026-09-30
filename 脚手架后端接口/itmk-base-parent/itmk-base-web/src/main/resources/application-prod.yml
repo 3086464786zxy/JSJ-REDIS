@@ -1,0 +1,5 @@
+# Production must use HTTPS. Secure cookies cannot be weakened by COOKIE_SECURE.
+app:
+  security:
+    refresh-token:
+      cookie-secure: true

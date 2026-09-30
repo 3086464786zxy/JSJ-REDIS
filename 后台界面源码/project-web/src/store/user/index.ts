@@ -4,6 +4,7 @@ import { getUserInfoApi } from '@/api/user';
 export const useUserStore = defineStore('user', {
   state: () => {
     return {
+      initialized: false,
       userId:'',
       nickName:'',
       token:'',
@@ -39,6 +40,7 @@ export const useUserStore = defineStore('user', {
         getUserInfoApi(this.userId).then((res)=>{
           if (res && res.code == 200) {
             this.codeList = res.data.permissions;
+            this.initialized = true;
           }
           resolve(this.codeList);
         }).catch((error) => {

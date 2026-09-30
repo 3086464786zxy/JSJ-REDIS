@@ -39,7 +39,6 @@ const tabsList = computed(()=>{
 })
 //选项卡点击事件
 const clickBtn = (pane: TabsPaneContext) => {
-  console.log(pane)
   const {props} = pane
   //跳转路由
   router.push({path:props.name as string})

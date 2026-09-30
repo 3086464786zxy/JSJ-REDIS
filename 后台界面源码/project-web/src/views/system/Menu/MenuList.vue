@@ -239,7 +239,6 @@ const getParent = async ()=>{
 }
 //上级菜单选中事件
 const treeClick = (item:any) => {
-  console.log(item)
   addModel.parentName = item.title;
 }
 //获取表格数据
@@ -253,7 +252,6 @@ const getList = async ()=>{
 //编辑
 const editBtn = async (row:MenuType)=>{
   btnTags.value = '1';
-  console.log(row);
   dialog.title = '编辑';
   await getParent();
   onShow();
@@ -265,7 +263,6 @@ const editBtn = async (row:MenuType)=>{
 }
 //删除
 const deleteBtn = async (menuId:string)=>{
-  console.log(menuId);
   const confirm = await global.$myconfirm('确定删除该数据吗?');
   //点击确定后返回true
   if (confirm) {
@@ -282,8 +279,6 @@ const deleteBtn = async (menuId:string)=>{
 const commit = () => {
   addForm.value?.validate(async (valid)=>{
     if(valid) {
-      console.log('验证通过')
-      console.log(addModel)
       //提交请求
       let res = null;
       if (btnTags.value == '0') {

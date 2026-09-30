@@ -3,7 +3,7 @@ import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/store/user'
 import { acknowledgeActivity, clearSession, isSessionIdle, pendingActivity } from './session'
 
-const config: AxiosRequestConfig = { baseURL: '', timeout: 10000, withCredentials: true }
+const config: AxiosRequestConfig = { baseURL: '', timeout: 10000, withCredentials: true, headers: { 'X-Requested-With': 'XMLHttpRequest' } }
 export interface Result<T = any> { code: number; msg: string; data: T }
 interface SessionRequest extends InternalAxiosRequestConfig { authRetried?: boolean; activityAt?: number }
 type RefreshResult = { accessToken: string; idleTimeoutSeconds: number }
@@ -20,7 +20,7 @@ export function endSession(message = '') {
   sessionStorage.clear()
   if (message) ElMessage.warning(message)
   void axios.post('/api/sysUser/loginOut', undefined, {
-    ...config, timeout: 3000, headers: token ? { Authorization: `Bearer ${token}` } : {},
+    ...config, timeout: 3000, headers: { ...config.headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
   }).catch(() => undefined).finally(() => window.location.replace('/login'))
 }
 
@@ -58,6 +58,10 @@ class Http {
       return response.data as unknown as AxiosResponse
     }, async (error: unknown) => {
       if (axios.isAxiosError(error) && error.response?.status === 401 && error.config) {
+        if (publicEndpoints.has(error.config.url || '')) {
+          ElMessage.error(error.response?.data?.msg || '账号、密码错误或账户不可用')
+          return Promise.reject(error)
+        }
         return this.retryAfterRefresh(error.config as SessionRequest)
       }
       const message = axios.isAxiosError(error)
@@ -119,10 +123,10 @@ class Http {
     }
   }
 
-  get<T = Result>(url: string, params?: object): Promise<T> { return this.instance.get(url, { params }) }
-  post<T = Result>(url: string, data?: object): Promise<T> { return this.instance.post(url, data) }
-  put<T = Result>(url: string, data?: object): Promise<T> { return this.instance.put(url, data) }
-  delete<T = Result>(url: string): Promise<T> { return this.instance.delete(url) }
-  upload<T = Result>(url: string, params?: object): Promise<T> { return this.instance.post(url, params) }
+  get<T = Result>(url: string, params?: object): Promise<T> { return this.instance.get(url, { params }) as unknown as Promise<T> }
+  post<T = Result>(url: string, data?: object): Promise<T> { return this.instance.post(url, data) as unknown as Promise<T> }
+  put<T = Result>(url: string, data?: object): Promise<T> { return this.instance.put(url, data) as unknown as Promise<T> }
+  delete<T = Result>(url: string): Promise<T> { return this.instance.delete(url) as unknown as Promise<T> }
+  upload<T = Result>(url: string, params?: object): Promise<T> { return this.instance.post(url, params) as unknown as Promise<T> }
 }
 export default new Http(config)

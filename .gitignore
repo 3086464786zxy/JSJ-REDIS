@@ -1,8 +1,11 @@
 .codex/
-.github/
 **/node_modules/
 **/target/
 **/.idea/
 **/.vscode/
 **/dist/
 *.log
+**/.env
+**/.env.local
+**/.env.*.local
+**/logs/
