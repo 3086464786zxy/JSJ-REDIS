@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.itmk.web.sys_audit.mapper.AuditEventMapper">
+  <select id="pendingCount" resultType="long" useCache="false">
+    SELECT COUNT(*) FROM sys_audit_pending WHERE received_at &lt; #{cutoff}
+  </select>
+</mapper>

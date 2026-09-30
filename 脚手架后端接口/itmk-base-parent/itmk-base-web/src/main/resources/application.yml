@@ -12,12 +12,22 @@ spring:
       connection-timeout: 5000
       validation-timeout: 2000
       max-lifetime: 1800000
+  flyway:
+    enabled: true
+    baseline-on-migrate: false
+    clean-disabled: true
+    validate-on-migrate: true
+    out-of-order: false
+    locations: classpath:db/migration
+  sql:
+    init:
+      mode: never
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
-      database: 0
+      database: ${REDIS_DATABASE:0}
       timeout: 2000ms
       connect-timeout: 2000ms
       lettuce:
@@ -80,3 +90,25 @@ logging:
   pattern:
     console: '%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger requestId=%X{requestId} - %msg%n'
     file: '%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger requestId=%X{requestId} - %msg%n'
+management:
+  server:
+    address: ${MANAGEMENT_ADDRESS:127.0.0.1}
+    port: ${MANAGEMENT_PORT:9091}
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db,redis,audit
+  metrics:
+    tags:
+      application: itmk
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true

@@ -17,6 +17,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci-mysql-only
+          MYSQL_DATABASE: jsj_reliability_tests
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "mysqladmin ping --silent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
       redis:
         image: redis:7.4-alpine
         ports: ['6379:6379']
@@ -34,7 +45,71 @@ jobs:
           cache: maven
           cache-dependency-path: '脚手架后端接口/itmk-base-parent/**/pom.xml'
       - name: Compile, integration tests and package
-        run: mvn -B -f '脚手架后端接口/itmk-base-parent/pom.xml' verify -Dauth.redis.port=6379
+        run: >-
+          mvn -B -f '脚手架后端接口/itmk-base-parent/pom.xml' verify
+          -Dauth.redis.port=6379
+          '-Dauth.mysql.url=jdbc:mysql://127.0.0.1:3306/jsj_reliability_tests?serverTimezone=UTC'
+          -Dauth.mysql.password=ci-mysql-only
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Verify runtime, metrics, authenticated load and audit
+        env:
+          DB_URL: jdbc:mysql://127.0.0.1:3306/jsj_reliability_tests?serverTimezone=UTC
+          DB_USERNAME: root
+          DB_PASSWORD: ci-mysql-only
+          JWT_SECRET: ci-isolated-only-64-character-secret-never-use-in-production-environment
+          REDIS_PORT: '6379'
+          SERVER_PORT: '18090'
+          MANAGEMENT_PORT: '19091'
+          LOG_FILE: ${{ runner.temp }}/api.log
+          VALIDATION_DATABASE: jsj_reliability_tests
+          VALIDATION_MANAGEMENT_URL: http://127.0.0.1:19091
+          VALIDATION_USERNAME: mysql-9001
+          VALIDATION_PASSWORD: integration-password-strong
+          VALIDATION_CAPTCHA_ID: ci-runtime
+          VALIDATION_CAPTCHA_CODE: CI123
+          LOAD_BASE_URL: http://127.0.0.1:18090
+          LOAD_VUS: '10'
+          LOAD_SECONDS: '30'
+          LOAD_REPORT: ${{ runner.temp }}/load.json
+        run: |
+          set -euo pipefail
+          java -jar '脚手架后端接口/itmk-base-parent/itmk-base-web/target/itmk-base-web-1.0-SNAPSHOT.jar' --server.address=127.0.0.1 > "$RUNNER_TEMP/api-console.log" 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
+          docker exec '${{ job.services.redis.id }}' redis-cli SET auth:captcha:ci-runtime CI123 EX 300
+          node ops/validation/ci-runtime.mjs
+      - name: Verify backup and restore against MySQL 8.4
+        env:
+          MYSQL_DEFAULTS_FILE: ${{ runner.temp }}/mysql-client.cnf
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '[client]\nhost=127.0.0.1\nport=3306\nuser=root\npassword=ci-mysql-only\n' > "$MYSQL_DEFAULTS_FILE"
+          cid='${{ job.services.mysql.id }}'
+          docker exec "$cid" mysqldump --version
+          # Use server-matching clients, while keeping connection settings out of argv.
+          docker cp "$MYSQL_DEFAULTS_FILE" "$cid:/tmp/client.cnf"
+          # Node supplies a defaults file first; wrappers drop that host-side option.
+          cat > "$RUNNER_TEMP/mysql-wrapper" <<EOF
+          #!/bin/bash
+          shift
+          exec docker exec -i "$cid" mysql --defaults-file=/tmp/client.cnf "\$@"
+          EOF
+          cat > "$RUNNER_TEMP/dump-wrapper" <<EOF
+          #!/bin/bash
+          shift
+          exec docker exec -i "$cid" mysqldump --defaults-file=/tmp/client.cnf "\$@"
+          EOF
+          chmod 700 "$RUNNER_TEMP/mysql-wrapper" "$RUNNER_TEMP/dump-wrapper"
+          export MYSQL_BIN="$RUNNER_TEMP/mysql-wrapper" MYSQLDUMP_BIN="$RUNNER_TEMP/dump-wrapper"
+          node ops/database/backup-restore.mjs backup jsj_reliability_tests "$RUNNER_TEMP/reliability.sql"
+          node ops/database/backup-restore.mjs restore-check jsj_restore_ci "$RUNNER_TEMP/reliability.sql"
+      - name: Check monitoring configuration and alert behavior
+        run: |
+          docker run --rm -v "$PWD/ops/monitoring:/etc/prometheus" --entrypoint /bin/promtool prom/prometheus:v3.15.0 check config /etc/prometheus/prometheus.yml
+          docker run --rm -v "$PWD/ops/monitoring:/etc/prometheus" -w /etc/prometheus --entrypoint /bin/promtool prom/prometheus:v3.15.0 test rules alert-tests.yml
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 15

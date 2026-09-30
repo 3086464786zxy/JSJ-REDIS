@@ -1,0 +1,33 @@
+rule_files: [alerts.yml]
+evaluation_interval: 1m
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'up{job="itmk-api",instance="localhost:9091"}'
+        values: '0x10'
+      - series: 'itmk_audit_incomplete{application="itmk"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: ItmkMetricsUnavailable
+        exp_alerts:
+          - exp_labels: {job: itmk-api, instance: 'localhost:9091', severity: critical}
+            exp_annotations: {summary: 'ITMK metrics endpoint unavailable'}
+      - eval_time: 2m
+        alertname: ItmkAuditIncomplete
+        exp_alerts:
+          - exp_labels: {application: itmk, severity: critical}
+            exp_annotations: {summary: 'ITMK has requests without an outcome after five minutes'}
+  - interval: 1m
+    input_series:
+      - series: 'up{job="itmk-api"}'
+        values: '1x10'
+      - series: 'itmk_audit_incomplete{application="itmk"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ItmkMetricsUnavailable
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: ItmkAuditIncomplete
+        exp_alerts: []

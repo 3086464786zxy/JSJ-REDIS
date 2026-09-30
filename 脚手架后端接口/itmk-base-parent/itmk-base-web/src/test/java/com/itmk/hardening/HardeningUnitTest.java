@@ -41,29 +41,23 @@ class HardeningUnitTest {
     void cacheInvalidationWinsAgainstAnInFlightOldFill() {
         RedisService redis = mock(RedisService.class);
         CustomerUserDetailService details = mock(CustomerUserDetailService.class);
-        PermissionCacheService cache = new PermissionCacheService(redis, details);
-        ReflectionTestUtils.setField(cache, "permissionTtlSeconds", 900L);
+        SecurityStateService states = mock(SecurityStateService.class);
+        PermissionCacheService cache = new PermissionCacheService(redis, details,states,new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+        ReflectionTestUtils.setField(cache, "ttl", 900L);
         AtomicReference<String> version = new AtomicReference<>("0");
-        when(redis.get("authz:user-version:{2}")).thenAnswer(i -> version.get());
-        when(redis.increment("authz:user-version:{2}"))
-                .thenAnswer(
-                        i -> {
-                            version.set("1");
-                            return 1L;
-                        });
+        when(states.read(2L,null)).thenAnswer(i -> new com.itmk.config.security.dto.SecurityState(2L,"user",0,Long.parseLong(version.get()),0,true,false));
         PermissionDto old = new PermissionDto(2L, "user", true, Set.of("old")),
                 fresh = new PermissionDto(2L, "user", true, Set.of());
         when(details.loadPermissionByUserId(2L))
                 .thenAnswer(
                         i -> {
-                            cache.invalidateUser(2L);
+                            version.set("1");
                             return old;
                         })
                 .thenReturn(fresh);
-        cache.getOrLoad(2L, "user");
         assertSame(fresh, cache.getOrLoad(2L, "user"));
-        verify(redis).setJson(eq("authz:user:{2}:v0:0"), eq(old), any());
-        verify(redis).getJson("authz:user:{2}:v0:1", PermissionDto.class);
+        verify(redis).setJson(eq("authz:db-user:{2}:v0:0"), eq(old), any());
+        verify(redis).getJson("authz:db-user:{2}:v0:1", PermissionDto.class);
     }
 
     private SysMenu menu(long id, long parent) {

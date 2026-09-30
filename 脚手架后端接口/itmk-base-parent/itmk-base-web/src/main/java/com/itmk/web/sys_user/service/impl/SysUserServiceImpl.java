@@ -29,6 +29,7 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser>
     @Autowired private SysMenuService sysMenuService;
 
     @Autowired private com.itmk.config.security.service.ManagementPolicy managementPolicy;
+    @Autowired private com.itmk.config.security.service.SecurityStateService securityStates;
 
     @Transactional(rollbackFor = Exception.class)
     @Override
@@ -101,6 +102,7 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser>
                 if (!sysUserRoleService.saveBatch(roles)) throw new IllegalStateException("角色保存失败");
             }
         }
+        securityStates.invalidateUser(sysUser.getUserId());
     }
 
     @Override

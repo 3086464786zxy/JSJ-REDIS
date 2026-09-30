@@ -30,6 +30,8 @@ public class TokenController {
     private final JwtUtils jwtUtils;
     private final AuthRedisService authRedisService;
     private final PermissionCacheService permissionCacheService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.itmk.config.security.service.SecurityStateService securityStates;
 
     @Value("${app.security.refresh-token.cookie-name:refresh_token}")
     private String cookieName;
@@ -64,6 +66,13 @@ public class TokenController {
         Long userId = stored.getUserId();
         String username = stored.getUsername();
         String sessionId = stored.getSessionId();
+        request.setAttribute("audit.userId", userId);
+        var session = authRedisService.getSession(userId, sessionId);
+        if (session == null || !username.equals(session.getUsername())
+                || !securityStates.validSession(userId, username, sessionId, session.getSessionVersion())) {
+            clearCookie(response);
+            return ResultUtils.error("登录已被撤销，请重新登录", 401);
+        }
         PermissionDto permission = permissionCacheService.getOrLoad(userId, username);
         if (permission == null || !permission.isEnabled()) {
             authRedisService.deleteSession(userId, sessionId);
