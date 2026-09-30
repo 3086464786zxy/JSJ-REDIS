@@ -33,7 +33,7 @@
     "@vue/tsconfig": "^0.8.1",
     "eslint": "^9.37.0",
     "eslint-plugin-vue": "~10.4.0",
-    "jiti": "^2.6.1",
+    "jiti": "^2.7.0",
     "npm-run-all2": "^8.0.4",
     "sass": "^1.93.2",
     "typescript": "~5.9.3",
