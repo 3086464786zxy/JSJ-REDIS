@@ -3,97 +3,55 @@ package com.itmk.config.security.service;
 import com.itmk.config.redis.RedisService;
 import com.itmk.config.security.detailservice.CustomerUserDetailService;
 import com.itmk.config.security.dto.PermissionDto;
+import com.itmk.config.security.dto.SecurityState;
 import com.itmk.web.sys_user.entity.SysUser;
-
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.TransientDataAccessResourceException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
-
 import java.time.Duration;
+import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 
-/** 权限缓存使用全局版本号失效。 角色/菜单变更只需 INCR 一次，无需用 KEYS/SCAN 扫描大量用户缓存。 */
+/** Database epochs commit with permission writes. Redis invalidation is no longer a correctness dependency. */
 @Service
 public class PermissionCacheService {
-    private static final String VERSION_KEY = "authz:global-version";
-    private static final String PERMISSION_PREFIX = "authz:user:";
-
-    private final RedisService redisService;
-    private final CustomerUserDetailService userDetailService;
-
-    @Value("${app.security.permission-ttl-seconds:900}")
-    private long permissionTtlSeconds;
-
-    @Value("${app.security.permission-ttl-jitter-seconds:180}")
-    private long permissionTtlJitterSeconds;
-
-    public PermissionCacheService(
-            RedisService redisService, CustomerUserDetailService userDetailService) {
-        this.redisService = redisService;
-        this.userDetailService = userDetailService;
+    private final RedisService redis;
+    private final CustomerUserDetailService details;
+    private final SecurityStateService states;
+    private final MeterRegistry metrics;
+    @Value("${app.security.permission-ttl-seconds:900}") private long ttl;
+    @Value("${app.security.permission-ttl-jitter-seconds:180}") private long jitter;
+    public PermissionCacheService(RedisService redis, CustomerUserDetailService details,
+            SecurityStateService states, MeterRegistry metrics) {
+        this.redis = redis; this.details = details; this.states = states; this.metrics = metrics;
     }
-
-    public PermissionDto getOrLoad(Long userId, String expectedUsername) {
-        String version = currentVersion(userId);
-        String key = permissionKey(userId, version);
-        PermissionDto permission = redisService.getJson(key, PermissionDto.class);
-        if (permission == null) {
-            permission = userDetailService.loadPermissionByUserId(userId);
+    public PermissionDto getOrLoad(Long id, String username) {
+        for (int attempt = 0; attempt < 3; attempt++) {
+            SecurityState before = states.read(id, null);
+            if (before == null || !before.enabled() || !Objects.equals(username, before.username())) return null;
+            String key = "authz:db-user:{" + id + "}:v" + before.cacheVersion();
+            PermissionDto permission = null;
+            try { permission = redis.getJson(key, PermissionDto.class); }
+            catch (DataAccessException e) { cacheFailure(); }
             if (permission == null) {
-                return null;
-            }
-            cache(key, permission);
+                metrics.counter("itmk.security.permission.cache", "result", "miss").increment();
+                permission = details.loadPermissionByUserId(id);
+                if (permission == null) return null;
+                try {
+                    long extra = jitter <= 0 ? 0 : ThreadLocalRandom.current().nextLong(jitter + 1);
+                    redis.setJson(key, permission, Duration.ofSeconds(ttl + extra));
+                } catch (DataAccessException e) { cacheFailure(); }
+            } else metrics.counter("itmk.security.permission.cache", "result", "hit").increment();
+            SecurityState after = states.read(id, null);
+            if (before.equals(after)) return Objects.equals(username, permission.getUsername()) ? permission : null;
+            metrics.counter("itmk.security.permission.retry").increment();
         }
-        return java.util.Objects.equals(expectedUsername, permission.getUsername())
-                ? permission
-                : null;
+        throw new TransientDataAccessResourceException("权限正在变更，请重试");
     }
-
-    /** Re-read authoritative permissions under the version captured before loading. */
-    public void cacheLoginUser(SysUser user) {
-        getOrLoad(user.getUserId(), user.getUsername());
-    }
-
-    public void invalidateAll() {
-        afterCommit(() -> redisService.increment(VERSION_KEY));
-    }
-
-    /** 用户资料或角色分配变化时只失效该用户，避免大用户量下全量回源。 */
-    public void invalidateUser(Long userId) {
-        afterCommit(() -> redisService.increment("authz:user-version:{" + userId + "}"));
-    }
-
-    private void afterCommit(Runnable action) {
-        if (TransactionSynchronizationManager.isActualTransactionActive()
-                && TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(
-                    new TransactionSynchronization() {
-                        @Override
-                        public void afterCommit() {
-                            action.run();
-                        }
-                    });
-        } else {
-            action.run();
-        }
-    }
-
-    private void cache(String key, PermissionDto permission) {
-        long jitter =
-                permissionTtlJitterSeconds <= 0
-                        ? 0
-                        : ThreadLocalRandom.current().nextLong(permissionTtlJitterSeconds + 1);
-        redisService.setJson(key, permission, Duration.ofSeconds(permissionTtlSeconds + jitter));
-    }
-
-    private String currentVersion(Long userId) {
-        String global = redisService.get(VERSION_KEY);
-        String user = redisService.get("authz:user-version:{" + userId + "}");
-        return (global == null ? "0" : global) + ":" + (user == null ? "0" : user);
-    }
-
-    private String permissionKey(Long userId, String version) {
-        return PERMISSION_PREFIX + "{" + userId + "}:v" + version;
-    }
+    private void cacheFailure() { metrics.counter("itmk.security.permission.cache.failures").increment(); }
+    public void cacheLoginUser(SysUser user) { getOrLoad(user.getUserId(), user.getUsername()); }
+    public void invalidateAll() { states.invalidateAll(); }
+    public void invalidateUser(Long id) { states.invalidateUser(id); }
 }

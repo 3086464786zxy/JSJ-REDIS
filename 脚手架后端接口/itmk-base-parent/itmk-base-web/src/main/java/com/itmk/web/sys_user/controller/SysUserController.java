@@ -73,10 +73,13 @@ public class SysUserController {
     private String cookieSameSite;
 
     @Autowired private com.itmk.config.security.service.ManagementPolicy managementPolicy;
+    @Autowired private com.itmk.config.security.service.SecurityStateService securityStates;
 
     // 新增
     @PreAuthorize("hasAuthority('sys:user:add')")
     @PostMapping
+    @com.itmk.config.audit.AuditedChange
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public ResultVo add(@jakarta.validation.Valid @RequestBody UserWriteParm parm) {
         if (parm.getUserId() != null) throw new IllegalArgumentException("新增用户不能指定ID");
         com.itmk.config.security.service.PasswordPolicy.validate(parm.getPassword());
@@ -93,12 +96,15 @@ public class SysUserController {
         sysUser.setPassword(passwordEncoder.encode(sysUser.getPassword()));
         sysUser.setCreateTime(LocalDateTime.now());
         sysUserService.saveUser(sysUser);
+        parm.setUserId(sysUser.getUserId());
         return ResultUtils.success("新增成功!");
     }
 
     // 编辑
     @PreAuthorize("hasAuthority('sys:user:edit')")
     @PutMapping
+    @com.itmk.config.audit.AuditedChange
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public ResultVo edit(@jakarta.validation.Valid @RequestBody UserWriteParm parm) {
         if (parm.getUserId() == null) throw new IllegalArgumentException("用户ID不能为空");
         if (parm.getPassword() != null && !parm.getPassword().isEmpty())
@@ -107,19 +113,17 @@ public class SysUserController {
         SysUser sysUser = parm.toUser();
         sysUser.setUpdateTime(LocalDateTime.now());
         sysUserService.editUser(sysUser);
-        permissionCacheService.invalidateUser(sysUser.getUserId());
         return ResultUtils.success("编辑成功!");
     }
 
     // 删除
     @PreAuthorize("hasAuthority('sys:user:delete')")
     @DeleteMapping("/{userId}")
+    @com.itmk.config.audit.AuditedChange
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public ResultVo delete(@PathVariable("userId") Long userId) {
         managementPolicy.assertUser(userId, true);
         sysUserService.deleteUser(userId);
-        permissionCacheService.invalidateUser(userId);
-        authRedisService.deleteAllSessions(userId);
-        authRedisService.deleteAllRefreshTokens(userId);
         return ResultUtils.success("删除成功");
     }
 
@@ -165,6 +169,8 @@ public class SysUserController {
     // 重置密码
     @PreAuthorize("hasAuthority('sys:user:reset')")
     @PostMapping("/resetPassword")
+    @com.itmk.config.audit.AuditedChange
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public ResultVo resetPassword(
             @jakarta.validation.Valid @RequestBody ResetPasswordParm sysUser) {
         managementPolicy.assertUser(sysUser.getUserId(), false);
@@ -175,8 +181,7 @@ public class SysUserController {
                 .eq(SysUser::getUserId, sysUser.getUserId())
                 .set(SysUser::getPassword, passwordEncoder.encode(sysUser.getPassword()));
         if (sysUserService.update(updateWrapper)) {
-            authRedisService.deleteAllSessions(sysUser.getUserId());
-            authRedisService.deleteAllRefreshTokens(sysUser.getUserId());
+            securityStates.revokeUser(sysUser.getUserId());
             return ResultUtils.success("密码重置成功!");
         }
         return ResultUtils.error("密码重置失败!");
@@ -237,9 +242,12 @@ public class SysUserController {
         authRedisService.createSession(
                 sessionId,
                 new AuthSessionDto(
-                        user.getUserId(), user.getUsername(), System.currentTimeMillis()),
+                        user.getUserId(), user.getUsername(), System.currentTimeMillis(), user.getSessionVersion()),
                 sessionTtl);
         permissionCacheService.cacheLoginUser(user);
+        request.setAttribute("audit.userId", user.getUserId());
+        if (!securityStates.validSession(user.getUserId(), user.getUsername(), sessionId, user.getSessionVersion()))
+            throw new com.itmk.config.security.exception.CustomerAuthenionException("账户信息已变更，请重新登录");
 
         LoginVo vo = new LoginVo();
         vo.setUserId(user.getUserId());
@@ -274,6 +282,8 @@ public class SysUserController {
     }
 
     @PostMapping("/updatePassword")
+    @com.itmk.config.audit.AuditedChange
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public ResultVo updatePassword(
             HttpServletRequest request, @RequestBody UpdatePasswordParm parm) {
         com.itmk.config.security.service.PasswordPolicy.validate(parm.getPassword());
@@ -291,10 +301,10 @@ public class SysUserController {
         updateWrapper
                 .lambda()
                 .set(SysUser::getPassword, passwordEncoder.encode(parm.getPassword()))
+                .eq(SysUser::getPassword, sysUser.getPassword())
                 .eq(SysUser::getUserId, currentUserId);
         if (sysUserService.update(updateWrapper)) {
-            authRedisService.deleteAllSessions(currentUserId);
-            authRedisService.deleteAllRefreshTokens(currentUserId);
+            securityStates.revokeUser(currentUserId);
             return ResultUtils.success("密码修改成功!");
         }
         return ResultUtils.error("密码修改失败!");
@@ -342,8 +352,8 @@ public class SysUserController {
                 DecodedJWT jwt = jwtUtils.jwtDecode(token);
                 Long userId = Long.valueOf(jwt.getClaim("userId").asString());
                 String sessionId = jwt.getClaim("sid").asString();
-                authRedisService.deleteSession(userId, sessionId);
-            } catch (RuntimeException ignored) {
+                durableLogout(request, userId, sessionId);
+            } catch (IllegalArgumentException ignored) {
                 // Token 已无效时也允许客户端完成本地退出。
             }
         }
@@ -351,14 +361,13 @@ public class SysUserController {
         // 2. 删除 RefreshToken 并清除 Cookie
         String refreshToken = extractCookie(request);
         if (refreshToken != null) {
-            try {
-                RefreshTokenDto stored = authRedisService.getRefreshToken(refreshToken);
-                if (stored != null) {
-                    authRedisService.deleteSession(stored.getUserId(), stored.getSessionId());
-                    authRedisService.deleteRefreshToken(refreshToken, stored.getUserId());
+            RefreshTokenDto stored = authRedisService.getRefreshToken(refreshToken);
+            if (stored != null) {
+                durableLogout(request, stored.getUserId(), stored.getSessionId());
+                try { authRedisService.deleteRefreshToken(refreshToken, stored.getUserId()); }
+                catch (org.springframework.dao.DataAccessException e) {
+                    org.slf4j.LoggerFactory.getLogger(getClass()).warn("Logout Redis cleanup failed; database revocation retained");
                 }
-            } catch (RuntimeException ignored) {
-                // RefreshToken 查询失败时忽略
             }
         }
         clearRefreshCookie(response);
@@ -372,6 +381,15 @@ public class SysUserController {
     }
 
     /** 从请求的 JWT Token 中提取当前用户 ID */
+    private void durableLogout(HttpServletRequest request, Long userId, String sessionId) {
+        securityStates.revokeSession(userId, sessionId);
+        request.setAttribute("audit.userId", userId);
+        try { authRedisService.deleteSession(userId, sessionId); }
+        catch (org.springframework.dao.DataAccessException e) {
+            org.slf4j.LoggerFactory.getLogger(getClass()).warn("Logout Redis cleanup failed; database revocation retained");
+        }
+    }
+
     private Long extractUserId(HttpServletRequest request) {
         String token = CheckTokenFilter.resolveToken(request);
         DecodedJWT jwt = jwtUtils.jwtDecode(token);

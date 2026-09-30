@@ -34,6 +34,7 @@ import java.util.Set;
 class SessionAuthenticationTest {
     private final AuthRedisService auth = mock(AuthRedisService.class);
     private final PermissionCacheService permissions = mock(PermissionCacheService.class);
+    private final com.itmk.config.security.service.SecurityStateService states=mock(com.itmk.config.security.service.SecurityStateService.class);
     private final LoginFailureHandler failure = mock(LoginFailureHandler.class);
     private final JwtUtils jwt = new JwtUtils();
     private TokenController controller;
@@ -53,6 +54,10 @@ class SessionAuthenticationTest {
         ReflectionTestUtils.setField(controller, "cookieName", "refresh_token");
         ReflectionTestUtils.setField(controller, "cookieSameSite", "Lax");
         filter = new CheckTokenFilter(jwt, auth, permissions, failure);
+        ReflectionTestUtils.setField(controller, "securityStates", states);
+        ReflectionTestUtils.setField(filter, "securityStates", states);
+        when(states.validSession(eq(7L),eq("tester"),eq("same-session"),any())).thenReturn(true);
+        when(auth.getSession(7L,"same-session")).thenReturn(new AuthSessionDto(7L,"tester",0,0L));
         ReflectionTestUtils.setField(filter, "ignoreUrl", java.util.List.of("/api/refresh"));
         when(auth.getRefreshToken(oldToken)).thenReturn(refresh);
         when(auth.newRefreshToken(7L)).thenReturn("7.11111111-1111-1111-1111-111111111111");
@@ -187,6 +192,7 @@ class SessionAuthenticationTest {
         SysUserController users = new SysUserController();
         ReflectionTestUtils.setField(users, "jwtUtils", jwt);
         ReflectionTestUtils.setField(users, "authRedisService", auth);
+        ReflectionTestUtils.setField(users, "securityStates", states);
         ReflectionTestUtils.setField(users, "cookieName", "refresh_token");
         ReflectionTestUtils.setField(users, "cookieSameSite", "Lax");
         jwt.setExpiration(-1);
@@ -196,6 +202,7 @@ class SessionAuthenticationTest {
         assertEquals(200, users.loginOut(request, response).getCode());
         verify(auth).deleteSession(7L, "same-session");
         verify(auth).deleteRefreshToken(oldToken, 7L);
+        verify(states).revokeSession(7L,"same-session");
         assertTrue(response.getHeader("Set-Cookie").contains("Max-Age=0"));
     }
 }

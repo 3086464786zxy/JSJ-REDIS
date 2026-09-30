@@ -75,8 +75,9 @@ public class SysMenuController {
 
     // 新增
     @PreAuthorize("hasAuthority('sys:menu:add')")
-    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     @PostMapping
+    @com.itmk.config.audit.AuditedChange
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public ResultVo add(@RequestBody SysMenu sysMenu) {
         managementPolicy.requireAdmin();
         validateMenu(sysMenu, true);
@@ -90,8 +91,9 @@ public class SysMenuController {
 
     // 编辑
     @PreAuthorize("hasAuthority('sys:menu:edit')")
-    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     @PutMapping
+    @com.itmk.config.audit.AuditedChange
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public ResultVo edit(@RequestBody SysMenu sysMenu) {
         managementPolicy.requireAdmin();
         validateMenu(sysMenu, false);
@@ -105,8 +107,9 @@ public class SysMenuController {
 
     // 删除
     @PreAuthorize("hasAuthority('sys:menu:delete')")
-    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     @DeleteMapping("/{menuId}")
+    @com.itmk.config.audit.AuditedChange
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public ResultVo delete(@PathVariable("menuId") Long menuId) {
         managementPolicy.requireAdmin();
         menuMapper.lockHierarchy();

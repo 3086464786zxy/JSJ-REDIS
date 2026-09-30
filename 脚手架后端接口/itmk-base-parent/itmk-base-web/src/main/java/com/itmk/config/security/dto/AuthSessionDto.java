@@ -12,4 +12,8 @@ public class AuthSessionDto {
     private Long userId;
     private String username;
     private long loginTime;
+    private Long sessionVersion;
+    public AuthSessionDto(Long userId, String username, long loginTime) {
+        this(userId, username, loginTime, null);
+    }
 }

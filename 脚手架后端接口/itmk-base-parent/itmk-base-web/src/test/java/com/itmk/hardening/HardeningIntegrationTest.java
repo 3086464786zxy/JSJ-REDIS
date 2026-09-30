@@ -35,6 +35,7 @@ import java.util.*;
             "spring.datasource.driver-class-name=org.h2.Driver",
             "spring.datasource.username=sa",
             "spring.datasource.password=",
+            "spring.flyway.enabled=false",
             "jwt.secret=hardening-tests-secret-at-least-32-bytes",
             "logging.file.name=target/hardening-test.log"
         })
@@ -53,7 +54,7 @@ class HardeningIntegrationTest {
 
     private String token(String username, long id, String... codes) {
         when(sessions.getSession(id, "test-session"))
-                .thenReturn(new AuthSessionDto(id, username, 0L));
+                .thenReturn(new AuthSessionDto(id, username, 0L, 0L));
         when(permissions.getOrLoad(id, username))
                 .thenReturn(new PermissionDto(id, username, true, Set.of(codes)));
         return "Bearer "
@@ -309,15 +310,17 @@ class HardeningIntegrationTest {
     }
 
     @Autowired org.springframework.transaction.PlatformTransactionManager transactionManager;
+    @Autowired SecurityStateService states;
 
     private PermissionCacheService cache() {
         return new PermissionCacheService(
                 redis,
-                mock(com.itmk.config.security.detailservice.CustomerUserDetailService.class));
+                mock(com.itmk.config.security.detailservice.CustomerUserDetailService.class), states,
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
     }
 
     @Test
-    void permissionVersionChangesOnlyAfterDatabaseCommit() {
+    void permissionVersionCommitsAtomicallyWithDatabaseChange() {
         new org.springframework.transaction.support.TransactionTemplate(transactionManager)
                 .executeWithoutResult(
                         status -> {
@@ -325,7 +328,8 @@ class HardeningIntegrationTest {
                             cache().invalidateAll();
                             verify(redis, never()).increment(anyString());
                         });
-        verify(redis).increment("authz:global-version");
+        assertEquals(1L, db.queryForObject("SELECT version FROM authz_state WHERE state_id=1",Long.class));
+        verify(redis, never()).increment(anyString());
     }
 
     @Test
@@ -339,6 +343,7 @@ class HardeningIntegrationTest {
                             status.setRollbackOnly();
                         });
         verify(redis, never()).increment(anyString());
+        assertEquals(0L, db.queryForObject("SELECT version FROM authz_state WHERE state_id=1",Long.class));
         assertEquals(
                 "Ordinary role",
                 db.queryForObject("SELECT role_name FROM sys_role WHERE role_id=20", String.class));

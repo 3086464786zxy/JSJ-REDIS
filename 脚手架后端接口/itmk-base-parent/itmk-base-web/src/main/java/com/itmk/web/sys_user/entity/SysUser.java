@@ -20,6 +20,10 @@ public class SysUser implements UserDetails {
     private Long userId;
 
     private String username;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private Long permissionVersion = 0L;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private Long sessionVersion = 0L;
 
     @com.fasterxml.jackson.annotation.JsonProperty(
             access = com.fasterxml.jackson.annotation.JsonProperty.Access.WRITE_ONLY)

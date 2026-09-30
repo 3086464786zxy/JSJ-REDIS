@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.itmk.web.sys_user.mapper.SecurityStateMapper">
+  <resultMap id="state" type="com.itmk.config.security.dto.SecurityState">
+    <constructor>
+      <arg column="user_id" javaType="java.lang.Long"/>
+      <arg column="username" javaType="java.lang.String"/>
+      <arg column="version" javaType="_long"/>
+      <arg column="permission_version" javaType="_long"/>
+      <arg column="session_version" javaType="_long"/>
+      <arg column="enabled" javaType="_boolean"/>
+      <arg column="revoked" javaType="_boolean"/>
+    </constructor>
+  </resultMap>
+  <select id="read" resultMap="state" useCache="false" flushCache="true">
+    SELECT u.user_id,u.username,a.version,u.permission_version,u.session_version,
+      (u.is_enabled AND u.is_account_non_expired AND u.is_account_non_locked
+       AND u.is_credentials_non_expired) AS enabled,
+      EXISTS(SELECT 1 FROM auth_revoked_session r WHERE r.session_id=#{sessionId}
+       AND r.user_id=u.user_id AND r.expires_at&gt;CURRENT_TIMESTAMP) AS revoked
+    FROM sys_user u CROSS JOIN authz_state a WHERE u.user_id=#{userId} AND a.state_id=1
+  </select>
+  <update id="invalidateAll">UPDATE authz_state SET version=version+1 WHERE state_id=1</update>
+  <update id="invalidateUser">UPDATE sys_user SET permission_version=permission_version+1 WHERE user_id=#{id}</update>
+  <update id="revokeUser">UPDATE sys_user SET session_version=session_version+1,permission_version=permission_version+1 WHERE user_id=#{id}</update>
+  <insert id="revokeSession">
+    INSERT INTO auth_revoked_session(session_id,user_id,expires_at) VALUES(#{sid},#{id},#{expiry})
+    ON DUPLICATE KEY UPDATE expires_at=VALUES(expires_at)
+  </insert>
+  <select id="lockAuthorizationState" resultType="java.lang.Long" useCache="false" flushCache="true">
+    SELECT version FROM authz_state WHERE state_id=1 FOR UPDATE
+  </select>
+  <select id="countUsers" resultType="long" useCache="false">SELECT COUNT(*) FROM sys_user</select>
+  <insert id="insertBootstrapAdmin">
+    INSERT INTO sys_user(username,password,is_admin,nick_name,create_time)
+    VALUES(#{username},#{password},'1','管理员',CURRENT_TIMESTAMP)
+  </insert>
+</mapper>

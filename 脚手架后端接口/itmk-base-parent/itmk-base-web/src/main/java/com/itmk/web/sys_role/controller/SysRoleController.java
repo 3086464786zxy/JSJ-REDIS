@@ -37,6 +37,8 @@ public class SysRoleController {
     // 新增
     @PreAuthorize("hasAuthority('sys:role:add')")
     @PostMapping
+    @com.itmk.config.audit.AuditedChange
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public ResultVo add(@RequestBody SysRole sysRole) {
         sysRole.setRoleId(null);
         if (sysRole.getRoleName() == null
@@ -53,6 +55,8 @@ public class SysRoleController {
     // 编辑
     @PreAuthorize("hasAuthority('sys:role:edit')")
     @PutMapping
+    @com.itmk.config.audit.AuditedChange
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public ResultVo edit(@RequestBody SysRole sysRole) {
         managementPolicy.assertRole(sysRole.getRoleId());
         sysRole.setCreateTime(null);
@@ -65,8 +69,9 @@ public class SysRoleController {
 
     // 删除
     @PreAuthorize("hasAuthority('sys:role:delete')")
-    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     @DeleteMapping("/{roleId}")
+    @com.itmk.config.audit.AuditedChange
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public ResultVo delete(@PathVariable("roleId") Long roleId) {
         roleMapper.lockRole(roleId);
         managementPolicy.assertRole(roleId);
@@ -127,9 +132,10 @@ public class SysRoleController {
     // 保存角色菜单
     @PreAuthorize("hasAuthority('sys:role:assign')")
     @PostMapping("/saveRoleMenu")
+    @com.itmk.config.audit.AuditedChange
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public ResultVo saveRoleMenu(@jakarta.validation.Valid @RequestBody SaveMenuParm parm) {
         roleMenuService.saveRoleMenu(parm);
-        permissionCacheService.invalidateAll();
         return ResultUtils.success("分配成功");
     }
 }

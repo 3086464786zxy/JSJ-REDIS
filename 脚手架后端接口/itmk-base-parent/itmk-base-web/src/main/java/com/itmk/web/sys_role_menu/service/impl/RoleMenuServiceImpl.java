@@ -20,6 +20,8 @@ public class RoleMenuServiceImpl extends ServiceImpl<RoleMenuMapper, RoleMenu>
 
     @org.springframework.beans.factory.annotation.Autowired
     private com.itmk.config.security.service.ManagementPolicy policy;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.itmk.config.security.service.PermissionCacheService permissions;
 
     @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     @Override
@@ -39,5 +41,6 @@ public class RoleMenuServiceImpl extends ServiceImpl<RoleMenuMapper, RoleMenu>
         // 再保存
         if (!ids.isEmpty() && !this.baseMapper.saveRoleMenu(parm.getRoleId(), ids))
             throw new IllegalStateException("角色菜单保存失败");
+        permissions.invalidateAll();
     }
 }

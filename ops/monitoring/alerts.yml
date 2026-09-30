@@ -1,0 +1,51 @@
+groups:
+  - name: itmk-reliability
+    rules:
+      - alert: ItmkMetricsUnavailable
+        expr: up{job="itmk-api"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: 'ITMK metrics endpoint unavailable'}
+      - alert: ItmkNotReady
+        expr: probe_success{job="itmk-readiness"} == 0
+        for: 30s
+        labels: {severity: critical}
+        annotations: {summary: 'ITMK database, Redis or audit readiness failed'}
+      - alert: ItmkProbeUnavailable
+        expr: up{job="itmk-readiness"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: 'ITMK readiness probe exporter unavailable'}
+      - alert: ItmkHttpErrors
+        expr: sum(rate(http_server_requests_seconds_count{application="itmk",status=~"5..",uri!~"/actuator.*"}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count{application="itmk",uri!~"/actuator.*"}[5m])), 0.001) > 0.01
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: 'ITMK HTTP 5xx error rate exceeds 1%'}
+      - alert: ItmkSlowRequests
+        expr: histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{application="itmk",uri!~"/actuator.*"}[5m]))) > 0.5
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: 'ITMK HTTP p95 latency exceeds 500ms'}
+      - alert: ItmkAuditWriteFailure
+        expr: increase(itmk_audit_write_failures_total[5m]) > 0
+        labels: {severity: critical}
+        annotations: {summary: 'ITMK audit write failed; investigate request receipts'}
+      - alert: ItmkAuditIncomplete
+        expr: itmk_audit_incomplete > 0
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: 'ITMK has requests without an outcome after five minutes'}
+      - alert: ItmkPermissionCacheFailure
+        expr: rate(itmk_security_permission_cache_failures_total[5m]) > 0
+        for: 1m
+        labels: {severity: warning}
+        annotations: {summary: 'ITMK permission cache failing; primary database fallback is active'}
+      - alert: ItmkDatabasePoolPressure
+        expr: hikaricp_connections_active / hikaricp_connections_max > 0.8
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: 'ITMK database pool utilization exceeds 80%'}
+      - alert: ItmkDatabasePoolTimeout
+        expr: increase(hikaricp_connections_timeout_total[5m]) > 0
+        labels: {severity: critical}
+        annotations: {summary: 'ITMK database connection acquisition timed out'}

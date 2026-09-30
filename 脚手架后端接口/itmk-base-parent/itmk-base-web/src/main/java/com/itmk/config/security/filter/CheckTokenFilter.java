@@ -36,6 +36,8 @@ public class CheckTokenFilter extends OncePerRequestFilter {
     private final AuthRedisService authRedisService;
     private final PermissionCacheService permissionCacheService;
     private final LoginFailureHandler loginFailureHandler;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.itmk.config.security.service.SecurityStateService securityStates;
 
     public CheckTokenFilter(
             JwtUtils jwtUtils,
@@ -94,6 +96,9 @@ public class CheckTokenFilter extends OncePerRequestFilter {
         if (session == null || !username.equals(session.getUsername())) {
             throw new CustomerAuthenionException("登录已失效，请重新登录");
         }
+        request.setAttribute("audit.userId", userId);
+        if (!securityStates.validSession(userId, username, sessionId, session.getSessionVersion()))
+            throw new CustomerAuthenionException("登录已被撤销，请重新登录");
 
         PermissionDto permission = permissionCacheService.getOrLoad(userId, username);
         if (permission == null || !permission.isEnabled()) {
