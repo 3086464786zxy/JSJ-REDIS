@@ -6,8 +6,11 @@ import com.auth0.jwt.JWTVerifier;
 import com.auth0.jwt.algorithms.Algorithm;
 import com.auth0.jwt.exceptions.JWTVerificationException;
 import com.auth0.jwt.interfaces.DecodedJWT;
+
 import jakarta.annotation.PostConstruct;
+
 import lombok.Data;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -24,8 +27,10 @@ public class JwtUtils {
     private String issuer;
     private String audience;
     private String secret;
+
     /** Access Token 有效期，单位：分钟。 */
     private int expiration;
+
     /** Refresh Token 有效期，单位：分钟。 */
     private int refreshExpiration;
 
@@ -34,11 +39,18 @@ public class JwtUtils {
 
     @PostConstruct
     public void init() {
+        if (secret == null
+                || secret.getBytes(java.nio.charset.StandardCharsets.UTF_8).length < 32
+                || issuer == null
+                || issuer.isBlank()
+                || audience == null
+                || audience.isBlank()
+                || expiration <= 0
+                || refreshExpiration <= 0) {
+            throw new IllegalStateException("JWT配置无效：密钥至少32字节，issuer/audience不能为空，有效期必须为正数");
+        }
         algorithm = Algorithm.HMAC256(secret);
-        verifier = JWT.require(algorithm)
-                .withIssuer(issuer)
-                .withAudience(audience)
-                .build();
+        verifier = JWT.require(algorithm).withIssuer(issuer).withAudience(audience).build();
     }
 
     public String generateToken(Map<String, String> claims) {
@@ -47,8 +59,7 @@ public class JwtUtils {
 
         JWTCreator.Builder builder = JWT.create();
         claims.forEach(builder::withClaim);
-        return builder
-                .withJWTId(UUID.randomUUID().toString())
+        return builder.withJWTId(UUID.randomUUID().toString())
                 .withIssuer(issuer)
                 .withAudience(audience)
                 .withIssuedAt(new Date())

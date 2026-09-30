@@ -2,7 +2,8 @@ import http from '@/http'
 import type { SysUser, SysUserListParm,Login,AssignTreeParm,UpdatePasswordParm } from './UserModel'
 //新增
 export const addApi = (parm:SysUser)=>{
-  return http.post("/api/sysUser",parm);
+  const {username,password,phone,email,sex,nickName,roleId} = parm;
+  return http.post("/api/sysUser",{username,password,phone,email,sex,nickName,roleId});
 }
 //列表查询
 export const getListApi = (parm:SysUserListParm)=>{
@@ -14,14 +15,15 @@ export const getRoleListApi = (userId:string)=> {
 }
 //编辑
 export const editApi = (parm:SysUser)=>{
-  return http.put("/api/sysUser",parm);
+  const {userId,username,phone,email,sex,nickName,roleId} = parm;
+  return http.put("/api/sysUser",{userId,username,phone,email,sex,nickName,roleId});
 }
 //删除
 export const deleteApi = (userId:string)=>{
   return http.delete(`/api/sysUser/${userId}`);
 }
 //重置密码
-export const resetPasswordApi = (parm:{userId:string}) => {
+export const resetPasswordApi = (parm:{userId:string,password:string}) => {
   return http.post("/api/sysUser/resetPassword",parm);
 }
 //验证码

@@ -6,9 +6,6 @@ const whiteList = ['/login']
 router.beforeEach(async (to,from,next)=>{
   const userStore = useUserStore();
   const menuStore = useMenuStore();
-  console.log(to)
-  console.log(from)
-  console.log(next)
   //获取token
   const token = userStore.getToken;
   //判断token是否存在
@@ -18,13 +15,9 @@ router.beforeEach(async (to,from,next)=>{
       next({path:'/'});
     } else {
       //判断权限数据是否存在
-      const hasRoles = userStore.getCodeList.length > 0;
-      const hasMenus = menuStore.getMenu && menuStore.getMenu.length > 1;
-      console.log('hasRoles: ' + hasRoles);
-      console.log('hasMenus: ' + hasMenus);
+      const hasRoles = userStore.initialized;
+      const hasMenus = menuStore.initialized;
       if (hasRoles && hasMenus) { //存在: 放行
-        console.log('---------------------------');
-        console.log(menuStore.getMenu);
         next()
       } else { //不存在: 从服务器获取
         try {

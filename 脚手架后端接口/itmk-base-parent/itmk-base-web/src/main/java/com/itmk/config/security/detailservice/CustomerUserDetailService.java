@@ -6,7 +6,8 @@ import com.itmk.web.sys_menu.entity.SysMenu;
 import com.itmk.web.sys_menu.service.SysMenuService;
 import com.itmk.web.sys_user.entity.SysUser;
 import com.itmk.web.sys_user.service.SysUserService;
-import org.apache.commons.lang.StringUtils;
+
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.AuthorityUtils;
@@ -23,10 +24,9 @@ import java.util.stream.Collectors;
 
 @Component("customerUserDetailService")
 public class CustomerUserDetailService implements UserDetailsService {
-    @Autowired
-    private SysUserService sysUserService;
-    @Autowired
-    private SysMenuService sysMenuService;
+    @Autowired private SysUserService sysUserService;
+    @Autowired private SysMenuService sysMenuService;
+
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         SysUser user = sysUserService.loadUser(username);
@@ -34,7 +34,7 @@ public class CustomerUserDetailService implements UserDetailsService {
             throw new CustomerAuthenionException("用户名错误或账户不存在");
         }
         List<String> collect = loadPermissionCodes(user);
-        //把权限字段交给springsecurity进行管理
+        // 把权限字段交给springsecurity进行管理
         String[] strings = collect.toArray(new String[0]);
         List<GrantedAuthority> authorities = AuthorityUtils.createAuthorityList(strings);
         user.setAuthorities(authorities);
@@ -50,9 +50,11 @@ public class CustomerUserDetailService implements UserDetailsService {
         return new PermissionDto(
                 user.getUserId(),
                 user.getUsername(),
-                user.isEnabled(),
-                Set.copyOf(loadPermissionCodes(user))
-        );
+                user.isEnabled()
+                        && user.isAccountNonExpired()
+                        && user.isAccountNonLocked()
+                        && user.isCredentialsNonExpired(),
+                Set.copyOf(loadPermissionCodes(user)));
     }
 
     private List<String> loadPermissionCodes(SysUser user) {
@@ -62,10 +64,11 @@ public class CustomerUserDetailService implements UserDetailsService {
         } else {
             menuList = sysMenuService.getMenuByUserId(user.getUserId());
         }
-        return Optional.ofNullable(menuList).orElseGet(ArrayList::new)
-                .stream()
+        return Optional.ofNullable(menuList).orElseGet(ArrayList::new).stream()
                 .filter(item -> item != null && StringUtils.isNotEmpty(item.getCode()))
-                .map(SysMenu::getCode)
+                .flatMap(item -> java.util.Arrays.stream(item.getCode().split(",")))
+                .map(String::trim)
+                .filter(code -> !code.isEmpty())
                 .distinct()
                 .collect(Collectors.toList());
     }

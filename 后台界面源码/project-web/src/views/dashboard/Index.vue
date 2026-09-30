@@ -30,16 +30,26 @@
 </template>
 <script setup lang='ts'>
 import { ref, nextTick, onMounted, reactive, onBeforeUnmount } from 'vue'
-import useInstance from '@/hooks/useInstance';
+import { init, use, type ECharts } from 'echarts/core'
+import { BarChart, PieChart } from 'echarts/charts'
+import { GridComponent, TitleComponent, TooltipComponent, LegendComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+use([BarChart, PieChart, GridComponent, TitleComponent, TooltipComponent, LegendComponent, CanvasRenderer])
+const chartInstances: ECharts[] = []
+const initChart = (element: HTMLElement) => {
+  const chart = init(element)
+  chartInstances.push(chart)
+  return chart
+}
+let resizeObserver: ResizeObserver | undefined
 const mianHeight = ref(0)
-const { global } = useInstance()
 const myChart = ref<HTMLElement>();
 const myChart1 = ref<HTMLElement>();
 const myChart2 = ref<HTMLElement>();
 //柱状图
 const charts1 = () => {
   //初始化echarts
-  const echartInstance = global.$echarts.init(myChart.value);
+  const echartInstance = initChart(myChart.value!);
   //配置项
   let option = reactive({
     xAxis: {
@@ -61,7 +71,7 @@ const charts1 = () => {
 }
 //饼图
 const charts2 = () => {
-  const myChart = global.$echarts.init(myChart1.value);
+  const myChart = initChart(myChart1.value!);
   let option = reactive({
     title: {
       subtext: 'Fake Data',
@@ -101,7 +111,7 @@ const charts2 = () => {
 }
 //环图
 const charts3 = () => {
-  const myChart = global.$echarts.init(myChart2.value);
+  const myChart = initChart(myChart2.value!);
   let option = reactive({
     tooltip: {
       trigger: 'item'
@@ -123,7 +133,7 @@ const charts3 = () => {
         emphasis: {
           label: {
             show: true,
-            fontSize: '40',
+            fontSize: 40,
             fontWeight: 'bold'
           }
         },
@@ -147,9 +157,17 @@ onMounted(() => {
   charts1();
   charts2();
   charts3();
+  resizeObserver = new ResizeObserver(() => chartInstances.forEach(chart => chart.resize()))
+  for (const element of [myChart.value, myChart1.value, myChart2.value]) {
+    if (element) resizeObserver.observe(element)
+  }
   nextTick(() => {
     mianHeight.value = window.innerHeight - 100
   })
+})
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  chartInstances.forEach(chart => chart.dispose())
 })
 </script>
 <style scoped lang='scss'></style>

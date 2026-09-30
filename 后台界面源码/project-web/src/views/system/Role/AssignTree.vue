@@ -105,8 +105,6 @@ const show = async (roleId:string,name:string) => {
 //提交表单
 const commit = async () => {
   //获取选择的菜单数据
-  console.log(treeRef.value?.getCheckedKeys());
-  console.log(treeRef.value?.getHalfCheckedKeys());
   const checkIds = treeRef.value?.getCheckedKeys() as string[];
   const halfcheckIds = treeRef.value?.getHalfCheckedKeys() as string[];
   let ids = checkIds?.concat(halfcheckIds);

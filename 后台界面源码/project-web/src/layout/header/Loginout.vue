@@ -84,6 +84,12 @@ const rules = reactive({
     required:true,
     trigger:['blur','change'],
     message:'请输入新密码',
+  }, {
+    validator: (_rule: unknown, value: string, callback: (error?: Error) => void) => {
+      callback(value.length >= 12 && value.length <= 64 && new TextEncoder().encode(value).length <= 72
+        ? undefined : new Error('密码须为12至64个字符，UTF-8编码不超过72字节'))
+    },
+    trigger: ['blur', 'change'],
   }],
   confirm:[{
     required:true,
@@ -93,7 +99,6 @@ const rules = reactive({
 })
 const commit = () => {
   upModel.userId = userStore.getUserId;
-  console.log(upModel.userId);
   form.value?.validate(async (valid)=>{
     if (valid) {
       //判断新密码和确定密码是否一致

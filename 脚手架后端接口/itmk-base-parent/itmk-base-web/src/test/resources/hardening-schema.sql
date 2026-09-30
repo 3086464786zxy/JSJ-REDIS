@@ -1,0 +1,15 @@
+DROP TABLE IF EXISTS sys_user_role;
+DROP TABLE IF EXISTS sys_role_menu;
+DROP TABLE IF EXISTS sys_menu;
+DROP TABLE IF EXISTS sys_role;
+DROP TABLE IF EXISTS sys_user;
+CREATE TABLE sys_user (user_id BIGINT AUTO_INCREMENT PRIMARY KEY, username VARCHAR(64) NOT NULL UNIQUE, password VARCHAR(100), phone VARCHAR(32), email VARCHAR(128), sex VARCHAR(1), is_admin VARCHAR(1), nick_name VARCHAR(64), is_account_non_expired BOOLEAN DEFAULT TRUE, is_account_non_locked BOOLEAN DEFAULT TRUE, is_credentials_non_expired BOOLEAN DEFAULT TRUE, is_enabled BOOLEAN DEFAULT TRUE, create_time TIMESTAMP, update_time TIMESTAMP);
+CREATE TABLE sys_role (role_id BIGINT AUTO_INCREMENT PRIMARY KEY, role_name VARCHAR(64), type VARCHAR(10), remark VARCHAR(256), create_time TIMESTAMP, update_time TIMESTAMP);
+CREATE TABLE sys_menu (menu_id BIGINT AUTO_INCREMENT PRIMARY KEY, parent_id BIGINT, title VARCHAR(64), code VARCHAR(128), name VARCHAR(128), path VARCHAR(256), url VARCHAR(256), type VARCHAR(1), icon VARCHAR(64), parent_name VARCHAR(64), order_num VARCHAR(20), create_time TIMESTAMP, update_time TIMESTAMP);
+CREATE TABLE sys_user_role (user_role_id BIGINT AUTO_INCREMENT PRIMARY KEY, user_id BIGINT REFERENCES sys_user(user_id), role_id BIGINT REFERENCES sys_role(role_id), UNIQUE(user_id,role_id));
+CREATE TABLE sys_role_menu (role_menu_id BIGINT AUTO_INCREMENT PRIMARY KEY, role_id BIGINT REFERENCES sys_role(role_id), menu_id BIGINT REFERENCES sys_menu(menu_id), UNIQUE(role_id,menu_id));
+INSERT INTO sys_user(user_id,username,password,is_admin,nick_name) VALUES (1,'admin','$2a$10$example','1','Admin'), (2,'ordinary','$2a$10$example','0','User'), (3,'target','$2a$10$example','0','Target');
+INSERT INTO sys_role(role_id,role_name) VALUES (10,'Admin role'),(20,'Ordinary role');
+INSERT INTO sys_menu(menu_id,parent_id,title,code,type,order_num) VALUES (100,0,'Roles','sys:role:assign','1','1'),(200,0,'Users','sys:user:edit,sys:user:reset','1','2');
+INSERT INTO sys_user_role(user_id,role_id) VALUES (1,10),(2,20),(3,10);
+INSERT INTO sys_role_menu(role_id,menu_id) VALUES (10,100),(10,200),(20,100);

@@ -1,5 +1,9 @@
 package com.itmk.auth;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
 import com.itmk.config.security.dto.AuthSessionDto;
 import com.itmk.config.security.dto.PermissionDto;
 import com.itmk.config.security.dto.RefreshTokenDto;
@@ -9,10 +13,12 @@ import com.itmk.config.security.service.AuthRedisService;
 import com.itmk.config.security.service.PermissionCacheService;
 import com.itmk.jwt.JwtUtils;
 import com.itmk.utils.ResultVo;
-import com.itmk.web.token.controller.TokenController;
 import com.itmk.web.sys_user.controller.SysUserController;
+import com.itmk.web.token.controller.TokenController;
+
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.http.Cookie;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,10 +30,6 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
 
 class SessionAuthenticationTest {
     private final AuthRedisService auth = mock(AuthRedisService.class);
@@ -43,7 +45,7 @@ class SessionAuthenticationTest {
     void setUp() {
         jwt.setIssuer("test");
         jwt.setAudience("test");
-        jwt.setSecret("session-tests-only");
+        jwt.setSecret("session-tests-only-secret-32-bytes-minimum");
         jwt.setExpiration(15);
         jwt.setRefreshExpiration(10080);
         jwt.init();
@@ -55,7 +57,8 @@ class SessionAuthenticationTest {
         when(auth.getRefreshToken(oldToken)).thenReturn(refresh);
         when(auth.newRefreshToken(7L)).thenReturn("7.11111111-1111-1111-1111-111111111111");
         when(auth.getSessionIdleTimeout()).thenReturn(Duration.ofMinutes(30));
-        when(permissions.getOrLoad(7L, "tester")).thenReturn(new PermissionDto(7L, "tester", true, Set.of()));
+        when(permissions.getOrLoad(7L, "tester"))
+                .thenReturn(new PermissionDto(7L, "tester", true, Set.of()));
     }
 
     @AfterEach
@@ -70,8 +73,11 @@ class SessionAuthenticationTest {
     }
 
     private MockHttpServletRequest protectedRequest(boolean activity) {
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/session/activity");
-        String token = jwt.generateToken(Map.of("userId", "7", "username", "tester", "sid", "same-session"));
+        MockHttpServletRequest request =
+                new MockHttpServletRequest("POST", "/api/session/activity");
+        String token =
+                jwt.generateToken(
+                        Map.of("userId", "7", "username", "tester", "sid", "same-session"));
         request.addHeader("Authorization", "Bearer " + token);
         if (activity) request.addHeader("X-Session-Activity", "1");
         return request;
@@ -79,12 +85,15 @@ class SessionAuthenticationTest {
 
     @Test
     void refreshKeepsSessionAndDoesNotRenewIdleTime() {
-        when(auth.rotateRefreshToken(eq(oldToken), anyString(), eq(refresh), any())).thenReturn(true);
+        when(auth.rotateRefreshToken(eq(oldToken), anyString(), eq(refresh), any()))
+                .thenReturn(true);
         MockHttpServletResponse response = new MockHttpServletResponse();
         ResultVo result = controller.refresh(refreshRequest(), response);
         assertEquals(200, result.getCode());
         Map<?, ?> data = (Map<?, ?>) result.getData();
-        assertEquals("same-session", jwt.jwtDecode((String) data.get("accessToken")).getClaim("sid").asString());
+        assertEquals(
+                "same-session",
+                jwt.jwtDecode((String) data.get("accessToken")).getClaim("sid").asString());
         assertEquals(1800L, data.get("idleTimeoutSeconds"));
         assertTrue(response.getHeader("Set-Cookie").contains("HttpOnly"));
         verify(auth, never()).createSession(anyString(), any(), any());
@@ -93,7 +102,8 @@ class SessionAuthenticationTest {
 
     @Test
     void expiredOrRevokedSessionCannotBeRecreatedByRefresh() {
-        when(auth.rotateRefreshToken(eq(oldToken), anyString(), eq(refresh), any())).thenReturn(false);
+        when(auth.rotateRefreshToken(eq(oldToken), anyString(), eq(refresh), any()))
+                .thenReturn(false);
         MockHttpServletResponse response = new MockHttpServletResponse();
         assertEquals(401, controller.refresh(refreshRequest(), response).getCode());
         assertNull(response.getHeader("Set-Cookie"));
@@ -102,7 +112,8 @@ class SessionAuthenticationTest {
 
     @Test
     void disabledUserCannotRefresh() {
-        when(permissions.getOrLoad(7L, "tester")).thenReturn(new PermissionDto(7L, "tester", false, Set.of()));
+        when(permissions.getOrLoad(7L, "tester"))
+                .thenReturn(new PermissionDto(7L, "tester", false, Set.of()));
         MockHttpServletResponse response = new MockHttpServletResponse();
         assertEquals(401, controller.refresh(refreshRequest(), response).getCode());
         verify(auth).deleteSession(7L, "same-session");
@@ -112,7 +123,11 @@ class SessionAuthenticationTest {
 
     @Test
     void missingRefreshCookieIsRejected() {
-        assertEquals(401, controller.refresh(new MockHttpServletRequest(), new MockHttpServletResponse()).getCode());
+        assertEquals(
+                401,
+                controller
+                        .refresh(new MockHttpServletRequest(), new MockHttpServletResponse())
+                        .getCode());
         verify(auth, never()).rotateRefreshToken(anyString(), anyString(), any(), any());
     }
 
@@ -158,9 +173,10 @@ class SessionAuthenticationTest {
 
     @Test
     void refreshAndLogoutRemainReachableWithoutValidAccessToken() throws Exception {
-        for (String path : new String[]{"/api/refresh", "/api/sysUser/loginOut"}) {
+        for (String path : new String[] {"/api/refresh", "/api/sysUser/loginOut"}) {
             FilterChain chain = mock(FilterChain.class);
-            filter.doFilter(new MockHttpServletRequest("POST", path), new MockHttpServletResponse(), chain);
+            filter.doFilter(
+                    new MockHttpServletRequest("POST", path), new MockHttpServletResponse(), chain);
             verify(chain).doFilter(any(), any());
         }
         verifyNoInteractions(failure);
@@ -183,4 +199,3 @@ class SessionAuthenticationTest {
         assertTrue(response.getHeader("Set-Cookie").contains("Max-Age=0"));
     }
 }
-

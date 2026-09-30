@@ -9,6 +9,7 @@ const modules = import.meta.glob('../../views/**/*.vue')
 export const useMenuStore = defineStore('menu', {
   state: () => {
     return {
+      initialized: false,
       collapse: true,
       //菜单数据
       menuList: [
@@ -46,13 +47,11 @@ export const useMenuStore = defineStore('menu', {
           if (res && res.code == 200) {
             //生成路由
             accessRoute = generateRoute(res.data, router) as any;
-            this.menuList = this.menuList.concat(accessRoute);
-            console.log('router: menulist');
-            console.log(this.menuList);
+            this.menuList = [this.menuList[0], ...accessRoute];
+            this.initialized = true;
           }
           resolve(this.menuList)
         }).catch((error) => {
-          console.log("getmenuList error");
           reject(error)
         })
       })
@@ -60,7 +59,7 @@ export const useMenuStore = defineStore('menu', {
   }
 })
 //动态生成路由
-export function generateRoute(routes: RouteRecordRaw[], router: any) {
+export function generateRoute(routes: RouteRecordRaw[], router: any, register = true) {
   //路由数据
   const res: Array<RouteRecordRaw> = [];
   routes.forEach((route: any) => {
@@ -77,14 +76,14 @@ export function generateRoute(routes: RouteRecordRaw[], router: any) {
     //有下级:
     if (tmp.children && tmp.children.length > 0) {
       if (route.component != 'Layout') {
-        tmp.children = Center;
+        tmp.component = Center;
       }
       //递归：生成下级
-      tmp.children = generateRoute(tmp.children, router);
+      tmp.children = generateRoute(tmp.children, router, false);
     }
     res.push(tmp)
     //加入路由
-    router.addRoute(tmp)
+    if (register) router.addRoute(tmp)
   })
   return res;
 }
